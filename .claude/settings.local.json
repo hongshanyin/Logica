@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gradlew build:*)",
+      "Bash(.gradlew.bat build --warning-mode all)",
+      "Bash(./gradlew build:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "Bash(gradlew.bat build:*)",
+      "Bash(powershell:*)",
+      "Bash(cat:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

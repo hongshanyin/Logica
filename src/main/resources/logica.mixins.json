@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.sorcery.logica.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "logica.refmap.json",
+  "mixins": [
+    "LookControlMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

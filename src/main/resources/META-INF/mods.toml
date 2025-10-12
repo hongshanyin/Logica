@@ -1,0 +1,36 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="logica"
+version="1.0.0"
+displayName="Logica"
+authors="Sorcery Dynasties"
+description='''
+Logica - AI Enhancement Mod based on Aperi Oculos
+'''
+
+[[mixins]]
+config="logica.mixins.json"
+
+[[dependencies.logica]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.logica]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.logica]]
+    modId="aperioculos"
+    mandatory=true
+    versionRange="[1.0,)"
+    ordering="AFTER"
+    side="BOTH"

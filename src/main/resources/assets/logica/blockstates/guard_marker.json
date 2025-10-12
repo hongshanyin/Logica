@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "logica:block/guard_marker"
+    }
+  }
+}

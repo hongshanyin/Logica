@@ -1,0 +1,57 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+version = '1.0.0'
+group = 'io.github.hongshanyin'
+archivesBaseName = 'logica'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+
+    // Mixin支持
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+            arg "-mixin.config=logica.mixins.json"
+            mods {
+                logica {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+repositories{
+    maven {
+        url "https://cursemaven.com"
+        content {
+            includeGroup "curse.maven"
+        }
+    }
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
+    implementation fg.deobf("curse.maven:aperioculos-1363381:7096709-sources-7096714")
+
+    // Mixin注解处理器（用于生成refmap）
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+// 设置Java编译编码为UTF-8
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+jar.finalizedBy('reobfJar')
