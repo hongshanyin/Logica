@@ -4,7 +4,7 @@ Logica - 智能AI增强模组
 
   📖 简介
 
-  Logica是一个基于https://github.com/hongshanyin/Aperi_Oculos感知框架的AI增强模组，为Minecraft怪物带来革命性的智能行为系统。通过不可见的标记方块和先进
+  Logica是一个基于https://github.com/hongshanyin/Aperi_Oculos 感知框架的AI增强模组，为Minecraft怪物带来革命性的智能行为系统。通过不可见的标记方块和先进
   的状态机架构，让每个怪物都能成为聪明的守卫、警觉的哨兵或专业的巡逻兵。
 
   ✨ 核心特性
