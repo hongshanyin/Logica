@@ -60,6 +60,16 @@ public class    LogicaConfig {
     public static final ForgeConfigSpec.DoubleValue TRACKING_COLLISION_RADIUS;
     public static final ForgeConfigSpec.DoubleValue TRACKING_SPEED_MULTIPLIER;
 
+    // ==================== 日志系统 ====================
+
+    public static final ForgeConfigSpec.BooleanValue ENABLE_DEBUG_LOGS;
+    public static final ForgeConfigSpec.BooleanValue LOG_GOAL_LIFECYCLE;
+    public static final ForgeConfigSpec.BooleanValue LOG_STATE_TRANSITIONS;
+    public static final ForgeConfigSpec.BooleanValue LOG_NAVIGATION;
+    public static final ForgeConfigSpec.BooleanValue LOG_PERCEPTION_EVENTS;
+    public static final ForgeConfigSpec.BooleanValue LOG_WAYPOINT_SEARCH;
+    public static final ForgeConfigSpec.BooleanValue LOG_STRATEGY_APPLICATION;
+
     // ==================== 辅助方法 ====================
 
     /**
@@ -146,8 +156,8 @@ public class    LogicaConfig {
 
         BUILDER.push("Investigation");
         INVESTIGATION_SPEED_MULTIPLIER = BUILDER
-                .comment("Movement speed multiplier during investigation (default: 1.5)")
-                .defineInRange("investigationSpeedMultiplier", 1.5, 0.5, 3.0);
+                .comment("Movement speed multiplier during investigation (default: 1.0)")
+                .defineInRange("investigationSpeedMultiplier", 1.0, 0.5, 3.0);
 
         INVESTIGATION_DURATION_TICKS = BUILDER
                 .comment("Default investigation duration in ticks (200 = 10 seconds)")
@@ -200,8 +210,8 @@ public class    LogicaConfig {
                 .defineInRange("sentriesRadius", 32.0, 8.0, 64.0);
 
         SENTRIES_SPEED_MULTIPLIER = BUILDER
-                .comment("Sentries movement speed multiplier (default: 1.3 = 30% faster)")
-                .defineInRange("sentriesSpeedMultiplier", 1.3, 0.5, 2.0);
+                .comment("Sentries movement speed multiplier (default: 1.0 = normal speed)")
+                .defineInRange("sentriesSpeedMultiplier", 1.0, 0.5, 2.0);
 
         SENTRIES_REST_CHANCE = BUILDER
                 .comment("Sentries rest chance per tick (0.0 - 1.0, default: 0.1)")
@@ -252,8 +262,42 @@ public class    LogicaConfig {
                 .defineInRange("collisionDetectionRadius", 1.5, 0.5, 5.0);
 
         TRACKING_SPEED_MULTIPLIER = BUILDER
-                .comment("Movement speed multiplier during tracking")
-                .defineInRange("trackingSpeedMultiplier", 1.5, 0.5, 3.0);
+                .comment("Movement speed multiplier during tracking (default: 1.0)")
+                .defineInRange("trackingSpeedMultiplier", 1.0, 0.5, 3.0);
+        BUILDER.pop();
+
+        BUILDER.push("Logging");
+        ENABLE_DEBUG_LOGS = BUILDER
+                .comment(
+                        "Master switch for all debug logging (disable for better performance)",
+                        "When disabled, ALL debug logs are skipped without any overhead",
+                        "Recommended: false for production, true for development/testing"
+                )
+                .define("enableDebugLogs", false);
+
+        LOG_GOAL_LIFECYCLE = BUILDER
+                .comment("Log Goal lifecycle events (start/stop/canUse)")
+                .define("logGoalLifecycle", true);
+
+        LOG_STATE_TRANSITIONS = BUILDER
+                .comment("Log AI state transitions (IDLE -> ALERT -> COMBAT, etc.)")
+                .define("logStateTransitions", true);
+
+        LOG_NAVIGATION = BUILDER
+                .comment("Log navigation and pathfinding details")
+                .define("logNavigation", false);
+
+        LOG_PERCEPTION_EVENTS = BUILDER
+                .comment("Log perception events (vision spotted, vibration heard)")
+                .define("logPerceptionEvents", true);
+
+        LOG_WAYPOINT_SEARCH = BUILDER
+                .comment("Log waypoint search and BFS algorithm details")
+                .define("logWaypointSearch", true);
+
+        LOG_STRATEGY_APPLICATION = BUILDER
+                .comment("Log strategy application and Goal registration")
+                .define("logStrategyApplication", true);
         BUILDER.pop();
 
         SPEC = BUILDER.build();

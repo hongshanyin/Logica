@@ -128,13 +128,12 @@ public class InvestigateGoal extends Goal {
         boolean moveToSuccess = false;
 
         if (path != null) {
-            // 🔥 FIX: 使用属性获取移动速度而不是mob.getSpeed()
-            double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-            double speed = baseSpeed * LogicaConfig.INVESTIGATION_SPEED_MULTIPLIER.get();
-            moveToSuccess = mob.getNavigation().moveTo(path, speed);
+            // 直接传入速度倍率，让导航系统自动处理
+            double speedMultiplier = LogicaConfig.INVESTIGATION_SPEED_MULTIPLIER.get();
+            moveToSuccess = mob.getNavigation().moveTo(path, speedMultiplier);
 
-            Logica.LOGGER.info("🔥 moveTo() returned: {} (using attribute speed: {}, mob.getSpeed(): {})",
-                    moveToSuccess, speed, mob.getSpeed());
+            Logica.LOGGER.info("🔥 moveTo() returned: {} (speed multiplier: {})",
+                    moveToSuccess, speedMultiplier);
         }
 
         Logica.LOGGER.info("Mob {} navigating to investigation point {} (path: {}, moveTo success: {})",
@@ -211,9 +210,7 @@ public class InvestigateGoal extends Goal {
                 // 立即前往新目标
                 net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(investigationTarget, 1);
                 if (path != null) {
-                    double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-                    double speed = baseSpeed * LogicaConfig.INVESTIGATION_SPEED_MULTIPLIER.get();
-                    mob.getNavigation().moveTo(path, speed);
+                    mob.getNavigation().moveTo(path, LogicaConfig.INVESTIGATION_SPEED_MULTIPLIER.get());
                 }
             }
         }
@@ -240,8 +237,7 @@ public class InvestigateGoal extends Goal {
                     net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(investigationTarget, 1);
                     boolean moveToSuccess = false;
                     if (path != null) {
-                        double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-                        moveToSuccess = mob.getNavigation().moveTo(path, baseSpeed * LogicaConfig.INVESTIGATION_SPEED_MULTIPLIER.get());
+                        moveToSuccess = mob.getNavigation().moveTo(path, LogicaConfig.INVESTIGATION_SPEED_MULTIPLIER.get());
                     }
 
                     if (!moveToSuccess) {

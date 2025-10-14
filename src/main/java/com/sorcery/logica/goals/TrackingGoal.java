@@ -207,7 +207,7 @@ public class TrackingGoal extends Goal {
 
         net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(lastSoundPosition, 1);
         if (path != null) {
-            mob.getNavigation().moveTo(path, mob.getSpeed() * LogicaConfig.TRACKING_SPEED_MULTIPLIER.get());
+            mob.getNavigation().moveTo(path, LogicaConfig.TRACKING_SPEED_MULTIPLIER.get());
         }
 
         // 朝向目标

@@ -51,6 +51,7 @@ public class PerceptionEventHandler {
     public static void onVibrationPerceived(VibrationPerceivedEvent event) {
         LivingEntity listenerEntity = event.getListener();
         Vec3 sourcePos = event.getSourcePos();
+        net.minecraft.world.entity.Entity sourceEntity = event.getSourceEntity();
 
         // 只处理Mob
         if (!(listenerEntity instanceof Mob listener)) {
@@ -59,6 +60,12 @@ public class PerceptionEventHandler {
 
         // 服务端处理
         if (listener.level().isClientSide()) {
+            return;
+        }
+
+        // 🔥 过滤声音来源：忽略其他怪物产生的声音（除了玩家）
+        if (sourceEntity != null && sourceEntity instanceof Mob) {
+            // 声音来自其他怪物，忽略（警报系统通过broadcastAlert直接设置目标）
             return;
         }
 

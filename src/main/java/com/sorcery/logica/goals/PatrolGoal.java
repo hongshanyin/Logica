@@ -280,9 +280,7 @@ public class PatrolGoal extends Goal {
 
         net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetPos, 1);
         if (path != null) {
-            double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-            double speed = baseSpeed * LogicaConfig.PATROL_SPEED_MULTIPLIER.get();
-            mob.getNavigation().moveTo(path, speed);
+            mob.getNavigation().moveTo(path, LogicaConfig.PATROL_SPEED_MULTIPLIER.get());
 
             Logica.LOGGER.debug("Patrol navigating to search point {} ({}/{})",
                     targetPos, currentSearchIndex + 1, searchPath.size());

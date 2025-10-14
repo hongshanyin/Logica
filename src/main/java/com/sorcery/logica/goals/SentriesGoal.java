@@ -142,13 +142,12 @@ public class SentriesGoal extends Goal {
             net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetWaypoint, 1);
             boolean moveToSuccess = false;
             if (path != null) {
-                // 🔥 FIX: 使用属性获取移动速度
-                double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-                double speed = baseSpeed * LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get();
-                moveToSuccess = mob.getNavigation().moveTo(path, speed);
+                // 直接传入速度倍率，让导航系统自动处理
+                double speedMultiplier = LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get();
+                moveToSuccess = mob.getNavigation().moveTo(path, speedMultiplier);
 
-                Logica.LOGGER.info("🔥 moveTo() returned: {} (using attribute speed: {}, mob.getSpeed(): {})",
-                        moveToSuccess, speed, mob.getSpeed());
+                Logica.LOGGER.info("🔥 moveTo() returned: {} (speed multiplier: {})",
+                        moveToSuccess, speedMultiplier);
             }
 
             Logica.LOGGER.info("Mob {} starting navigation to first waypoint: {} (path: {}, moveTo: {})",
@@ -263,8 +262,7 @@ public class SentriesGoal extends Goal {
             net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetWaypoint, 1);
             boolean success = false;
             if (path != null) {
-                double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-                success = mob.getNavigation().moveTo(path, baseSpeed * LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get());
+                success = mob.getNavigation().moveTo(path, LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get());
             }
 
             if (!success) {
@@ -320,8 +318,7 @@ public class SentriesGoal extends Goal {
 
             net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetPos, 1);
             if (path != null) {
-                double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-                mob.getNavigation().moveTo(path, baseSpeed * LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get());
+                mob.getNavigation().moveTo(path, LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get());
             }
 
             Logica.LOGGER.debug("Mob {} choosing new sentries target at distance {} from center: {}",

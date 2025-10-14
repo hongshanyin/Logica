@@ -40,10 +40,9 @@ repositories{
         }
     }
 }
-
 dependencies {
     minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
-    implementation fg.deobf("curse.maven:aperioculos-1363381:7096709-sources-7096714")
+    implementation fg.deobf("curse.maven:aperi-oculos-1363381:7098690")
 
     // Mixin注解处理器（用于生成refmap）
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'

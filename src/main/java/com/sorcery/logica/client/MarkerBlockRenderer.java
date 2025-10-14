@@ -46,7 +46,35 @@ public class MarkerBlockRenderer {
     private static void initializeMapping() {
         if (blockToItemMap == null) {
             blockToItemMap = new HashMap<>();
+
+            // 守卫标记（单个）
             blockToItemMap.put(ModBlocks.GUARD_MARKER.get(), ModBlocks.GUARD_MARKER_ITEM.get());
+
+            // 哨兵标记（0-15编号）
+            for (int i = 0; i < 16; i++) {
+                blockToItemMap.put(ModBlocks.SENTRIES_MARKERS.get(i).get(),
+                                 ModBlocks.SENTRIES_MARKER_ITEMS.get(i).get());
+            }
+
+            // 哨兵路径点（0-15编号）
+            for (int i = 0; i < 16; i++) {
+                blockToItemMap.put(ModBlocks.SENTRIES_WAYPOINTS.get(i).get(),
+                                 ModBlocks.SENTRIES_WAYPOINT_ITEMS.get(i).get());
+            }
+
+            // 巡逻标记（0-15编号）
+            for (int i = 0; i < 16; i++) {
+                blockToItemMap.put(ModBlocks.PATROL_MARKERS.get(i).get(),
+                                 ModBlocks.PATROL_MARKER_ITEMS.get(i).get());
+            }
+
+            // 巡逻路径点（0-15编号）
+            for (int i = 0; i < 16; i++) {
+                blockToItemMap.put(ModBlocks.PATROL_WAYPOINTS.get(i).get(),
+                                 ModBlocks.PATROL_WAYPOINT_ITEMS.get(i).get());
+            }
+
+            // 向后兼容：旧版无编号方块
             blockToItemMap.put(ModBlocks.SENTRIES_MARKER.get(), ModBlocks.SENTRIES_MARKER_ITEM.get());
             blockToItemMap.put(ModBlocks.PATROL_MARKER.get(), ModBlocks.PATROL_MARKER_ITEM.get());
             blockToItemMap.put(ModBlocks.PATROL_WAYPOINT.get(), ModBlocks.PATROL_WAYPOINT_ITEM.get());

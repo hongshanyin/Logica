@@ -138,10 +138,7 @@ public class GuardGoal extends Goal {
             // 返回家
             net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(homePosition, 1);
             if (path != null) {
-                // 🔥 FIX: 使用属性获取移动速度并应用配置倍率
-                double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-                double speed = baseSpeed * LogicaConfig.GUARD_SPEED_MULTIPLIER.get();
-                mob.getNavigation().moveTo(path, speed);
+                mob.getNavigation().moveTo(path, LogicaConfig.GUARD_SPEED_MULTIPLIER.get());
             }
 
             Logica.LOGGER.debug("Mob {} too far from home ({}), returning",
@@ -169,19 +166,13 @@ public class GuardGoal extends Goal {
 
                 net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetPos, 1);
                 if (path != null) {
-                    // 🔥 FIX: 使用属性获取移动速度并应用配置倍率
-                    double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-                    double speed = baseSpeed * LogicaConfig.GUARD_SPEED_MULTIPLIER.get();
-                    mob.getNavigation().moveTo(path, speed);
+                    mob.getNavigation().moveTo(path, LogicaConfig.GUARD_SPEED_MULTIPLIER.get());
                 }
             } else {
                 // 离家较远，靠近家
                 net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(homePosition, 1);
                 if (path != null) {
-                    // 🔥 FIX: 使用属性获取移动速度并应用配置倍率
-                    double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-                    double speed = baseSpeed * LogicaConfig.GUARD_SPEED_MULTIPLIER.get();
-                    mob.getNavigation().moveTo(path, speed);
+                    mob.getNavigation().moveTo(path, LogicaConfig.GUARD_SPEED_MULTIPLIER.get());
                 }
             }
         }
@@ -237,10 +228,7 @@ public class GuardGoal extends Goal {
 
         net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetBlockPos, 1);
         if (path != null) {
-            // 🔥 FIX: 使用属性获取移动速度并应用配置倍率
-            double baseSpeed = mob.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-            double speed = baseSpeed * LogicaConfig.GUARD_SPEED_MULTIPLIER.get();
-            mob.getNavigation().moveTo(path, speed);
+            mob.getNavigation().moveTo(path, LogicaConfig.GUARD_SPEED_MULTIPLIER.get());
         }
 
         // 随机转向
