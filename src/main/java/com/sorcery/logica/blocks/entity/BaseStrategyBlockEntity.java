@@ -20,11 +20,29 @@ import java.util.List;
 /**
  * 策略方块BlockEntity基类
  *
- * 工作原理：
- * - 每秒tick一次（像信标）
- * - 自己查找周围3x3x3的怪物
- * - 对新生成的怪物应用策略
- * - 无需全局管理器，方块本身就有能力
+ * <h2>工作原理</h2>
+ * <ul>
+ *   <li>每秒tick一次（类似信标机制）</li>
+ *   <li>检测标记方块所在位置新生成的怪物</li>
+ *   <li>对符合条件的怪物应用对应策略</li>
+ *   <li>无需全局管理器，方块自主工作</li>
+ * </ul>
+ *
+ * <h2>影响范围设计</h2>
+ * <p><strong>精确生成点</strong>：标记方块仅影响在其所占方块内生成的怪物
+ * <p><strong>灵活布局</strong>：通过放置多个同编号标记方块，可以扩大影响区域
+ * <ul>
+ *   <li>沿着怪物生成走廊放置多个标记方块</li>
+ *   <li>在大型刷怪房地板铺满标记方块</li>
+ *   <li>根据刷怪场地形自由布置标记方块网格</li>
+ * </ul>
+ *
+ * <h2>应用条件</h2>
+ * <ul>
+ *   <li>怪物必须是新生成的（tickCount ≤ 40）</li>
+ *   <li>怪物未被其他标记方块处理过</li>
+ *   <li>怪物的blockPosition必须与标记方块位置完全一致</li>
+ * </ul>
  */
 public abstract class BaseStrategyBlockEntity extends BlockEntity {
 
@@ -32,11 +50,6 @@ public abstract class BaseStrategyBlockEntity extends BlockEntity {
      * Tick检查间隔（20 tick = 1秒）
      */
     private static final int CHECK_INTERVAL = 20;
-
-    /**
-     * 策略方块的影响范围（格）- 3x3x3光环
-     */
-    private static final int MARKER_RANGE = 1;
 
     /**
      * Tick计数器
@@ -62,12 +75,12 @@ public abstract class BaseStrategyBlockEntity extends BlockEntity {
     }
 
     /**
-     * 对周围怪物应用信标效果
+     * 对标记方块位置的怪物应用策略
      */
     private void applyBeaconEffect(ServerLevel level) {
-        // 查找3x3x3范围内的怪物
-        AABB searchBox = new AABB(this.worldPosition).inflate(MARKER_RANGE);
-        List<Mob> nearbyMobs = level.getEntitiesOfClass(Mob.class, searchBox);
+        // 只检查标记方块所在位置的怪物
+        AABB markerBox = new AABB(this.worldPosition);
+        List<Mob> nearbyMobs = level.getEntitiesOfClass(Mob.class, markerBox);
 
         // 只在有新怪物需要处理时记录日志
         if (nearbyMobs.isEmpty()) {
@@ -75,8 +88,8 @@ public abstract class BaseStrategyBlockEntity extends BlockEntity {
         }
 
         for (Mob mob : nearbyMobs) {
-            // 🔥 关键检查：只对刚生成的怪物施加策略
-            // 如果怪物存在时间超过2秒（40 ticks），说明是进入光环的，不应用策略
+            // 关键检查：只对刚生成的怪物施加策略
+            // 如果怪物存在时间超过2秒（40 ticks），说明是走进来的，不应用策略
             if (mob.tickCount > 40) {
                 continue; // 不记录日志
             }
@@ -86,11 +99,10 @@ public abstract class BaseStrategyBlockEntity extends BlockEntity {
                 continue; // 不记录日志
             }
 
-            // 检查距离（精确距离检查）
-            double distance = mob.blockPosition().distSqr(this.worldPosition);
-            if (distance > MARKER_RANGE * MARKER_RANGE) {
-                Logica.LOGGER.debug("  - {} skipped: too far (distance={})",
-                        mob.getName().getString(), Math.sqrt(distance));
+            // 检查怪物是否在标记方块位置（精确匹配）
+            if (!mob.blockPosition().equals(this.worldPosition)) {
+                Logica.LOGGER.debug("  - {} skipped: not at marker position (at {} vs marker at {})",
+                        mob.getName().getString(), mob.blockPosition(), this.worldPosition);
                 continue;
             }
 
@@ -100,7 +112,7 @@ public abstract class BaseStrategyBlockEntity extends BlockEntity {
             // 标记为已处理
             mob.getPersistentData().putBoolean("logica_marker_applied", true);
 
-            Logica.LOGGER.info("Applied {} strategy to {} (spawned {} ticks ago) via beacon effect",
+            Logica.LOGGER.info("Applied {} strategy to {} (spawned {} ticks ago) at marker position",
                     getStrategy(), mob.getName().getString(), mob.tickCount);
         }
     }

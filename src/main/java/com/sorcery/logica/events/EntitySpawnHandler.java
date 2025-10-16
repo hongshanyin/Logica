@@ -94,7 +94,9 @@ public class EntitySpawnHandler {
                     // 移除冲突的原版Goals
                     removeConflictingGoals(mob);
 
-                    // 重新注册基础调查Goals
+                    // 重新注册基础调查Goals（包括战斗监控）
+                    mob.goalSelector.addGoal(-1, new CombatMonitorGoal(mob));
+                    mob.goalSelector.addGoal(2, new TrackingGoal(mob));
                     mob.goalSelector.addGoal(3, new InvestigateGoal(mob));
                     mob.goalSelector.addGoal(6, new SearchingGoal(mob));
 
@@ -159,10 +161,14 @@ public class EntitySpawnHandler {
         removeConflictingGoals(mob);
 
         // 注册基础调查Goals
+        // Priority -1: 战斗监控 (检测目标是否隐身/消失)
+        // Priority 2: 追踪Goal (TRACKING状态)
         // Priority 3: 调查Goal (ALERT状态)
         // Priority 6: 搜索Goal (SEARCHING状态, 低优先级不干扰RandomStrollGoal)
-        mob.goalSelector.addGoal(3, new InvestigateGoal(mob));  // ALERT状态
-        mob.goalSelector.addGoal(6, new SearchingGoal(mob));    // SEARCHING状态
+        mob.goalSelector.addGoal(-1, new CombatMonitorGoal(mob)); // 战斗监控
+        mob.goalSelector.addGoal(2, new TrackingGoal(mob));       // TRACKING状态
+        mob.goalSelector.addGoal(3, new InvestigateGoal(mob));    // ALERT状态
+        mob.goalSelector.addGoal(6, new SearchingGoal(mob));      // SEARCHING状态
 
         // 标记已注册基础Goals（持久化到Capability）
         mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
@@ -172,7 +178,7 @@ public class EntitySpawnHandler {
         // 也设置PersistentData标记（用于当前会话）
         mob.getPersistentData().putBoolean("logica_basic_goals_registered", true);
 
-        Logica.LOGGER.info("Registered basic investigation goals for {}", mob.getName().getString());
+        Logica.LOGGER.info("Registered basic investigation goals (with combat monitor) for {}", mob.getName().getString());
     }
 
     /**

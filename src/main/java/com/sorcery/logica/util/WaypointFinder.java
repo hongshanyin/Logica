@@ -13,10 +13,30 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.*;
 
 /**
- * 路径点查找器
+ * 路径点查找器 - BFS链式连接算法
  *
- * 使用BFS算法查找与策略标记方块相接的所有路径点
- * 无视Y轴高度差异，适用于立体路线
+ * <h2>工作原理</h2>
+ * <pre>
+ * 策略标记方块 → [1格] → 第一个路径点 → [N格] → 第二个路径点 → ...
+ *               BFS搜索      链式连接         链式连接
+ * </pre>
+ *
+ * <h2>搜索半径（可配置）</h2>
+ * <ul>
+ *   <li><strong>PATROL策略</strong>: 16格（支持稀疏路径点，适合长距离巡逻）</li>
+ *   <li><strong>SENTRIES策略</strong>: 1格（要求紧密相邻，确保完整覆盖）</li>
+ * </ul>
+ *
+ * <h2>特性</h2>
+ * <ul>
+ *   <li>无视Y轴高度差异，支持立体路线</li>
+ *   <li>自动调整路径点到地面（findGroundBelow）</li>
+ *   <li>按坐标排序（Y → X → Z）</li>
+ *   <li>避免回路（只从标记方块开始，不重复搜索标记）</li>
+ * </ul>
+ *
+ * @see com.sorcery.logica.config.LogicaConfig#PATROL_WAYPOINT_SEARCH_RADIUS
+ * @see com.sorcery.logica.config.LogicaConfig#SENTRIES_WAYPOINT_SEARCH_RADIUS
  */
 public class WaypointFinder {
 
@@ -39,67 +59,34 @@ public class WaypointFinder {
     }
 
     /**
-     * 半径搜索路径点（巡逻策略专用）
-     * 搜索标记方块指定半径内所有同编号路径点，不需要相连
-     */
-    private static List<BlockPos> findWaypointsInRadius(Level level, BlockPos strategyPos, AIStrategy strategy, int teamId) {
-        Block waypointBlock = getWaypointBlock(strategy);
-        if (waypointBlock == null) {
-            return List.of();
-        }
-
-        List<BlockPos> waypoints = new ArrayList<>();
-        int searchRadius = LogicaConfig.PATROL_WAYPOINT_SEARCH_RADIUS.get().intValue();
-
-        if (LogicaConfig.shouldLogWaypointSearch()) {
-            Logica.LOGGER.info("Searching patrol waypoints within {} blocks radius from {}",
-                    searchRadius, strategyPos);
-        }
-
-        // 扫描以策略标记为中心的立方体区域
-        for (int dx = -searchRadius; dx <= searchRadius; dx++) {
-            for (int dy = -searchRadius; dy <= searchRadius; dy++) {
-                for (int dz = -searchRadius; dz <= searchRadius; dz++) {
-                    BlockPos checkPos = strategyPos.offset(dx, dy, dz);
-                    BlockState state = level.getBlockState(checkPos);
-                    Block block = state.getBlock();
-
-                    // 检查是否为匹配的路径点
-                    if (isMatchingWaypoint(block, waypointBlock, teamId)) {
-                        // 高度调整：将路径点调整到地面
-                        BlockPos groundPos = findGroundBelow(level, checkPos);
-                        waypoints.add(groundPos);
-
-                        if (LogicaConfig.shouldLogWaypointSearch()) {
-                            Logica.LOGGER.debug("Found patrol waypoint at {} (adjusted from {})",
-                                    groundPos, checkPos);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 按照坐标排序（Y -> X -> Z）
-        waypoints.sort(Comparator.<BlockPos>comparingInt(BlockPos::getY)
-                .thenComparingInt(BlockPos::getX)
-                .thenComparingInt(BlockPos::getZ));
-
-        if (LogicaConfig.shouldLogWaypointSearch()) {
-            Logica.LOGGER.info("Found {} patrol waypoints within {} blocks radius",
-                    waypoints.size(), searchRadius);
-        }
-
-        return waypoints;
-    }
-
-    /**
-     * BFS搜索相连的路径点
+     * BFS搜索相连的路径点（链式连接算法）
      *
-     * 搜索策略：
-     * 1. 从策略标记方块开始
-     * 2. 检查相邻1格的路径点（直接相连）
-     * 3. 从每个路径点继续搜索周围指定半径内的下一个路径点
-     * 4. 支持路径点之间有间隔（通过搜索半径连接）
+     * <pre>
+     * 搜索示例（PATROL策略，半径=16）：
+     *
+     *     [标记方块] ─┬─ (1格) ─→ [路径点1] ─┬─ (16格内) ─→ [路径点2]
+     *                 │                       │
+     *                 └─ (1格) ─→ [路径点1'] └─ (16格内) ─→ [路径点3]
+     *
+     * 搜索示例（SENTRIES策略，半径=1）：
+     *
+     *     [标记方块] ── (1格) ─→ [路径点1] ── (1格) ─→ [路径点2] ── (1格) ─→ ...
+     *
+     * </pre>
+     *
+     * <p><strong>搜索策略</strong>：
+     * <ul>
+     *   <li>策略标记方块：只检查直接相邻（1格）</li>
+     *   <li>路径点方块：检查周围半径内的下一个路径点</li>
+     *   <li>避免回路：不再搜索标记方块，只搜索路径点</li>
+     *   <li>高度调整：所有路径点自动调整到地面</li>
+     * </ul>
+     *
+     * @param level 世界
+     * @param strategyPos 策略标记方块位置
+     * @param strategy AI策略类型
+     * @param teamId 区域编号（0-15）
+     * @return 排序后的路径点列表（按Y→X→Z排序）
      */
     private static List<BlockPos> findConnectedWaypoints(Level level, BlockPos strategyPos, AIStrategy strategy, int teamId) {
         Block waypointBlock = getWaypointBlock(strategy);
@@ -111,7 +98,7 @@ public class WaypointFinder {
         Set<BlockPos> visited = new HashSet<>();
         Queue<BlockPos> queue = new LinkedList<>();
 
-        // 🔥 根据策略获取路径点搜索半径
+        // 根据策略获取路径点搜索半径
         int waypointSearchRadius;
         if (strategy == AIStrategy.PATROL) {
             waypointSearchRadius = LogicaConfig.PATROL_WAYPOINT_SEARCH_RADIUS.get().intValue();
@@ -139,7 +126,7 @@ public class WaypointFinder {
 
             boolean isWaypoint = isMatchingWaypoint(currentBlock, waypointBlock, teamId);
             if (isWaypoint) {
-                // 🔥 高度调整：将路径点调整到地面
+                // 高度调整：将路径点调整到地面
                 BlockPos groundPos = findGroundBelow(level, current);
                 waypoints.add(groundPos);
 
@@ -149,7 +136,7 @@ public class WaypointFinder {
                 }
             }
 
-            // 🔥 搜索策略：
+            // 搜索策略：
             // - 如果是策略标记方块：只检查直接相邻（1格）的路径点
             // - 如果是路径点方块：检查周围半径内的下一个路径点
             boolean isMarker = isMatchingStrategyMarker(currentBlock, strategy, teamId);
@@ -251,7 +238,7 @@ public class WaypointFinder {
     }
 
     /**
-     * 🔥 高度调整：从指定位置向下查找地面
+     * 高度调整：从指定位置向下查找地面
      *
      * @param level 世界
      * @param pos 起始位置

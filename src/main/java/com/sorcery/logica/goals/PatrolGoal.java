@@ -30,6 +30,34 @@ import java.util.Random;
  */
 public class PatrolGoal extends Goal {
 
+    // ==================== 常量定义 ====================
+
+    /** 到达路径点的距离阈值（格） */
+    private static final double ARRIVAL_DISTANCE = 5.0;
+
+    /** 返回中断位置的到达距离（格） */
+    private static final double RETURN_ARRIVAL_DISTANCE = 3.0;
+
+    /** 在路径点等待的时长（tick），60 tick = 3秒 */
+    private static final int WAIT_DURATION_TICKS = 60;
+
+    /** 返回中断位置的最大失败次数 */
+    private static final int MAX_RETURN_FAILURE_COUNT = 10;
+
+    /** 搜索路径中间点最小数量 */
+    private static final int MIN_INTERMEDIATE_POINTS = 2;
+
+    /** 搜索路径中间点最大数量 */
+    private static final int MAX_INTERMEDIATE_POINTS = 4;
+
+    /** 环顾四周的视野半径（格） */
+    private static final double LOOK_AROUND_RADIUS = 10.0;
+
+    /** 快速转向速度（正常为10.0F） */
+    private static final float LOOK_SPEED = 10.0F;
+
+    // ==================== 实例变量 ====================
+
     private final Mob mob;
     private final Random random = new Random();
 
@@ -153,11 +181,11 @@ public class PatrolGoal extends Goal {
         this.returnFailureCount = 0;
 
         if (LogicaConfig.shouldLogGoalLifecycle()) {
-            Logica.LOGGER.info("🔥 PatrolGoal.start() CALLED for {} with {} waypoints, current index: {}",
+            Logica.LOGGER.info("PatrolGoal.start() for {} with {} waypoints, current index: {}",
                     mob.getName().getString(), waypoints.size(), currentWaypointIndex);
         }
 
-        // 🔥 优先返回离开点（如果存在）
+        // 优先返回离开点（如果存在）
         mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
             BlockPos interruptedPos = cap.getInterruptedPatrolPosition();
             if (interruptedPos != null) {
@@ -169,10 +197,10 @@ public class PatrolGoal extends Goal {
                 net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(interruptedPos, 1);
                 if (path != null) {
                     mob.getNavigation().moveTo(path, LogicaConfig.PATROL_SPEED_MULTIPLIER.get());
-                    // 🔥 标记正在返回，但不清除离开点（等到达后再清除）
+                    // 标记正在返回，但不清除离开点（等到达后再清除）
                     this.isReturningToInterruptedPosition = true;
                 } else {
-                    // 🔥 无法创建路径，直接放弃返回
+                    // 无法创建路径，直接放弃返回
                     if (LogicaConfig.shouldLogGoalLifecycle()) {
                         Logica.LOGGER.warn("Mob {} cannot create path to interrupted position {}, giving up",
                                 mob.getName().getString(), interruptedPos);
@@ -194,7 +222,7 @@ public class PatrolGoal extends Goal {
     public void stop() {
         mob.getNavigation().stop();
 
-        // 🔥 记录离开巡逻时的位置（只在首次被吸引离开时记录）
+        // 记录离开巡逻时的位置（只在首次被吸引离开时记录）
         mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
             cap.setCurrentWaypointIndex(currentWaypointIndex);
 
@@ -221,110 +249,180 @@ public class PatrolGoal extends Goal {
             return;
         }
 
-        // 🔥 处理返回中断位置
         if (isReturningToInterruptedPosition) {
-            mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
-                BlockPos interruptedPos = cap.getInterruptedPatrolPosition();
-                if (interruptedPos != null) {
-                    Vec3 mobPos = mob.position();
-                    Vec3 targetPos = Vec3.atCenterOf(interruptedPos);
-                    double distance = mobPos.distanceTo(targetPos);
-
-                    // 到达离开点（距离<3格）
-                    if (distance < 3.0) {
-                        if (LogicaConfig.shouldLogNavigation()) {
-                            Logica.LOGGER.info("Mob {} reached interrupted position {}, clearing and resuming patrol",
-                                    mob.getName().getString(), interruptedPos);
-                        }
-
-                        // 清除离开点
-                        cap.setInterruptedPatrolPosition(null);
-                        isReturningToInterruptedPosition = false;
-                        returnFailureCount = 0;
-
-                        // 生成到下一个路径点的搜索路径，继续正常巡逻
-                        generateSearchPath();
-                    } else {
-                        // 继续前往（如果导航完成，重新设置）
-                        if (mob.getNavigation().isDone()) {
-                            net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(interruptedPos, 1);
-                            if (path != null) {
-                                mob.getNavigation().moveTo(path, LogicaConfig.PATROL_SPEED_MULTIPLIER.get());
-                                returnFailureCount = 0; // 成功创建路径，重置计数器
-                            } else {
-                                // 🔥 无法创建路径，增加失败计数
-                                returnFailureCount++;
-                                if (LogicaConfig.shouldLogNavigation()) {
-                                    Logica.LOGGER.warn("Mob {} failed to create path to interrupted position {} (attempt {}/10)",
-                                            mob.getName().getString(), interruptedPos, returnFailureCount);
-                                }
-
-                                // 🔥 失败10次后放弃返回
-                                if (returnFailureCount >= 10) {
-                                    if (LogicaConfig.shouldLogNavigation()) {
-                                        Logica.LOGGER.warn("Mob {} giving up returning to interrupted position {} after 10 failures",
-                                                mob.getName().getString(), interruptedPos);
-                                    }
-                                    cap.setInterruptedPatrolPosition(null);
-                                    isReturningToInterruptedPosition = false;
-                                    returnFailureCount = 0;
-                                    // 生成正常巡逻路径
-                                    generateSearchPath();
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // 离开点不存在了，取消返回状态
-                    isReturningToInterruptedPosition = false;
-                    returnFailureCount = 0;
-                    generateSearchPath(); // 生成正常巡逻路径
-                }
-            });
-
-            // 🔥 如果没有放弃，继续返回模式
-            if (isReturningToInterruptedPosition) {
-                return; // 阻止正常巡逻
-            }
-            // 否则继续执行下面的正常巡逻逻辑
+            tickReturnToInterruptedPosition();
+            return;
         }
 
         if (isWaiting) {
-            // 停留并环顾
-            waitTimer++;
-
-            // 环顾四周
-            if (--lookAroundCooldown <= 0) {
-                lookAroundCooldown = LogicaConfig.LOOK_AROUND_INTERVAL.get();
-
-                // 朝向随机方向
-                double angle = random.nextDouble() * Math.PI * 2;
-                double radius = 10.0;
-                double lookX = mob.getX() + Math.cos(angle) * radius;
-                double lookZ = mob.getZ() + Math.sin(angle) * radius;
-                double lookY = mob.getY() + mob.getEyeHeight();
-
-                mob.getLookControl().setLookAt(lookX, lookY, lookZ, 10.0F, mob.getMaxHeadXRot());
-            }
-
-            // 停留结束
-            if (waitTimer >= 60) { // 3秒
-                isWaiting = false;
-                waitTimer = 0;
-
-                // 前往下一个路径点
-                currentWaypointIndex = (currentWaypointIndex + 1) % waypoints.size();
-                generateSearchPath();
-
-                if (LogicaConfig.shouldLogNavigation()) {
-                    Logica.LOGGER.debug("Mob {} moving to next waypoint: {}",
-                            mob.getName().getString(), currentWaypointIndex);
-                }
-            }
+            tickWaitingAtWaypoint();
         } else {
-            // 移动到搜索路径
-            followSearchPath();
+            tickMovingToWaypoint();
         }
+    }
+
+    /**
+     * 处理返回中断位置的逻辑
+     * 检查是否到达、继续导航、或放弃返回
+     */
+    private void tickReturnToInterruptedPosition() {
+        mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+            BlockPos interruptedPos = cap.getInterruptedPatrolPosition();
+
+            if (interruptedPos == null) {
+                cancelReturnMode();
+                generateSearchPath();
+                return;
+            }
+
+            if (hasReachedInterruptedPosition(interruptedPos)) {
+                completeReturnToInterruptedPosition(cap, interruptedPos);
+            } else {
+                continueNavigatingToInterruptedPosition(interruptedPos);
+            }
+        });
+
+        // 如果没有放弃，继续返回模式
+        if (!isReturningToInterruptedPosition) {
+            // 已取消返回，继续正常巡逻
+            return;
+        }
+    }
+
+    /**
+     * 检查是否已到达中断位置
+     */
+    private boolean hasReachedInterruptedPosition(BlockPos interruptedPos) {
+        Vec3 mobPos = mob.position();
+        Vec3 targetPos = Vec3.atCenterOf(interruptedPos);
+        return mobPos.distanceTo(targetPos) < RETURN_ARRIVAL_DISTANCE;
+    }
+
+    /**
+     * 完成返回中断位置，恢复正常巡逻
+     */
+    private void completeReturnToInterruptedPosition(IAICapability cap, BlockPos interruptedPos) {
+        if (LogicaConfig.shouldLogNavigation()) {
+            Logica.LOGGER.info("Mob {} reached interrupted position {}, clearing and resuming patrol",
+                    mob.getName().getString(), interruptedPos);
+        }
+
+        cap.setInterruptedPatrolPosition(null);
+        isReturningToInterruptedPosition = false;
+        returnFailureCount = 0;
+
+        generateSearchPath();
+    }
+
+    /**
+     * 继续前往中断位置
+     */
+    private void continueNavigatingToInterruptedPosition(BlockPos interruptedPos) {
+        if (mob.getNavigation().isDone()) {
+            net.minecraft.world.level.pathfinder.Path path =
+                mob.getNavigation().createPath(interruptedPos, 1);
+
+            if (path != null) {
+                mob.getNavigation().moveTo(path, LogicaConfig.PATROL_SPEED_MULTIPLIER.get());
+                returnFailureCount = 0;
+            } else {
+                handleReturnNavigationFailure(interruptedPos);
+            }
+        }
+    }
+
+    /**
+     * 处理返回导航失败
+     */
+    private void handleReturnNavigationFailure(BlockPos interruptedPos) {
+        returnFailureCount++;
+
+        if (LogicaConfig.shouldLogNavigation()) {
+            Logica.LOGGER.warn("Mob {} failed to create path to interrupted position {} (attempt {}/{})",
+                    mob.getName().getString(), interruptedPos,
+                    returnFailureCount, MAX_RETURN_FAILURE_COUNT);
+        }
+
+        if (returnFailureCount >= MAX_RETURN_FAILURE_COUNT) {
+            abandonReturnToInterruptedPosition(interruptedPos);
+        }
+    }
+
+    /**
+     * 放弃返回中断位置
+     */
+    private void abandonReturnToInterruptedPosition(BlockPos interruptedPos) {
+        if (LogicaConfig.shouldLogNavigation()) {
+            Logica.LOGGER.warn("Mob {} giving up returning to interrupted position {} after {} failures",
+                    mob.getName().getString(), interruptedPos, MAX_RETURN_FAILURE_COUNT);
+        }
+
+        mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+            cap.setInterruptedPatrolPosition(null);
+        });
+
+        cancelReturnMode();
+        generateSearchPath();
+    }
+
+    /**
+     * 取消返回模式
+     */
+    private void cancelReturnMode() {
+        isReturningToInterruptedPosition = false;
+        returnFailureCount = 0;
+    }
+
+    /**
+     * 处理在路径点等待的逻辑
+     * 包括环顾四周和等待计时
+     */
+    private void tickWaitingAtWaypoint() {
+        waitTimer++;
+
+        if (--lookAroundCooldown <= 0) {
+            lookAroundRandomly();
+            lookAroundCooldown = LogicaConfig.LOOK_AROUND_INTERVAL.get();
+        }
+
+        if (waitTimer >= WAIT_DURATION_TICKS) {
+            finishWaitingAndMoveToNextWaypoint();
+        }
+    }
+
+    /**
+     * 随机环顾四周
+     */
+    private void lookAroundRandomly() {
+        double angle = random.nextDouble() * Math.PI * 2;
+        double lookX = mob.getX() + Math.cos(angle) * LOOK_AROUND_RADIUS;
+        double lookZ = mob.getZ() + Math.sin(angle) * LOOK_AROUND_RADIUS;
+        double lookY = mob.getY() + mob.getEyeHeight();
+
+        mob.getLookControl().setLookAt(lookX, lookY, lookZ, LOOK_SPEED, mob.getMaxHeadXRot());
+    }
+
+    /**
+     * 完成等待，前往下一个路径点
+     */
+    private void finishWaitingAndMoveToNextWaypoint() {
+        isWaiting = false;
+        waitTimer = 0;
+
+        currentWaypointIndex = (currentWaypointIndex + 1) % waypoints.size();
+        generateSearchPath();
+
+        if (LogicaConfig.shouldLogNavigation()) {
+            Logica.LOGGER.debug("Mob {} moving to next waypoint: {}",
+                    mob.getName().getString(), currentWaypointIndex);
+        }
+    }
+
+    /**
+     * 处理移动到路径点的逻辑
+     */
+    private void tickMovingToWaypoint() {
+        followSearchPath();
     }
 
     /**
@@ -336,13 +434,13 @@ public class PatrolGoal extends Goal {
 
         BlockPos targetWaypoint = waypoints.get(currentWaypointIndex);
 
-        // 🔥 从当前位置到目标路径点生成搜索路径
+        // 从当前位置到目标路径点生成搜索路径
         Vec3 startPos = mob.position();
         Vec3 endPos = Vec3.atCenterOf(targetWaypoint);
 
-        // 🔥 如果距离太近（已经在路径点上），直接标记为到达
+        // 如果距离太近（已经在路径点上），直接标记为到达
         double distanceToTarget = startPos.distanceTo(endPos);
-        if (distanceToTarget < 5.0) {
+        if (distanceToTarget < ARRIVAL_DISTANCE) {
             if (LogicaConfig.shouldLogNavigation()) {
                 Logica.LOGGER.info("Mob {} already near waypoint {} (distance: {}), starting wait",
                         mob.getName().getString(), currentWaypointIndex, distanceToTarget);
@@ -361,7 +459,8 @@ public class PatrolGoal extends Goal {
         double searchRadius = LogicaConfig.PATROL_SEARCH_RADIUS.get();
 
         // 生成2-4个随机中间点
-        int intermediateCount = 2 + random.nextInt(3); // 2, 3, or 4
+        int intermediateCount = MIN_INTERMEDIATE_POINTS +
+                               random.nextInt(MAX_INTERMEDIATE_POINTS - MIN_INTERMEDIATE_POINTS + 1);
 
         for (int i = 1; i <= intermediateCount; i++) {
             double progress = (double) i / (intermediateCount + 1);
@@ -398,8 +497,8 @@ public class PatrolGoal extends Goal {
         Vec3 mobPos = mob.position();
         double distance = mobPos.distanceTo(targetPoint);
 
-        // 到达搜索点（距离判定5格，宽松判定确保流畅移动）
-        if (distance < 5.0) {
+        // 到达搜索点（宽松判定确保流畅移动）
+        if (distance < ARRIVAL_DISTANCE) {
             currentSearchIndex++;
 
             if (currentSearchIndex >= searchPath.size()) {
