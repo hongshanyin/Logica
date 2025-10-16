@@ -4,6 +4,7 @@ import com.sorcery.logica.Logica;
 import com.sorcery.logica.ai.AIState;
 import com.sorcery.logica.capability.AICapabilityProvider;
 import com.sorcery.logica.capability.IAICapability;
+import com.sorcery.logica.config.LogicaConfig;
 import io.github.Sorcery_Dynasties.aperioculos.api.AperiOculosAPI;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
@@ -104,8 +105,10 @@ public class CombatMonitorGoal extends Goal {
             cap.setLastKnownTargetPos(target.blockPosition());
             cap.setTrackingTicks(0);
 
-            Logica.LOGGER.debug("Mob {} lost sight of target, switching to TRACKING at {}",
-                    mob.getName().getString(), target.blockPosition());
+            if (LogicaConfig.shouldLogStateTransitions()) {
+                Logica.LOGGER.debug("Mob {} lost sight of target, switching to TRACKING at {}",
+                        mob.getName().getString(), target.blockPosition());
+            }
         });
     }
 
@@ -116,8 +119,10 @@ public class CombatMonitorGoal extends Goal {
         mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
             cap.setState(AIState.SEARCHING);
 
-            Logica.LOGGER.debug("Mob {} switching to SEARCHING (reason: {})",
-                    mob.getName().getString(), reason);
+            if (LogicaConfig.shouldLogStateTransitions()) {
+                Logica.LOGGER.debug("Mob {} switching to SEARCHING (reason: {})",
+                        mob.getName().getString(), reason);
+            }
         });
 
         // 清除目标

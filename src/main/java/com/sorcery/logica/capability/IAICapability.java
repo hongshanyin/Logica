@@ -70,4 +70,20 @@ public interface IAICapability {
      */
     int getTrackingTicks();
     void setTrackingTicks(int ticks);
+
+    // ==================== 巡逻中断位置 ====================
+
+    /**
+     * 获取离开巡逻状态时的位置（用于Patrol/Sentries策略返回）
+     */
+    BlockPos getInterruptedPatrolPosition();
+    void setInterruptedPatrolPosition(BlockPos pos);
+
+    // ==================== Goals注册标记 ====================
+
+    /**
+     * 是否已注册基础调查Goals（用于重新加载时恢复）
+     */
+    boolean hasBasicGoals();
+    void setHasBasicGoals(boolean hasGoals);
 }

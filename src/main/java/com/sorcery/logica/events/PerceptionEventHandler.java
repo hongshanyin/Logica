@@ -53,8 +53,8 @@ public class PerceptionEventHandler {
         Vec3 sourcePos = event.getSourcePos();
         net.minecraft.world.entity.Entity sourceEntity = event.getSourceEntity();
 
-        // 只处理Mob
-        if (!(listenerEntity instanceof Mob listener)) {
+        // 只处理Monster（攻击性生物）
+        if (!(listenerEntity instanceof net.minecraft.world.entity.monster.Monster listener)) {
             return;
         }
 
@@ -63,10 +63,29 @@ public class PerceptionEventHandler {
             return;
         }
 
+        // 🔥 忽略创造模式玩家的声音
+        if (LogicaConfig.IGNORE_CREATIVE_PLAYERS.get() && sourceEntity instanceof Player player) {
+            if (player.isCreative()) {
+                return;
+            }
+        }
+
         // 🔥 过滤声音来源：忽略其他怪物产生的声音（除了玩家）
         if (sourceEntity != null && sourceEntity instanceof Mob) {
             // 声音来自其他怪物，忽略（警报系统通过broadcastAlert直接设置目标）
             return;
+        }
+
+        // 🔥 首次听到声音时，立即注册基础Goals
+        if (!listener.getPersistentData().getBoolean("logica_basic_goals_registered")) {
+            EntitySpawnHandler.registerBasicInvestigationGoals(listener);
+
+            // 🔥 调试：记录怪物生成信息
+            listener.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+                Logica.LOGGER.info("🔥 Mob {} registered basic goals - Strategy: {}, SpawnPos: {}, CurrentPos: {}, TickCount: {}",
+                        listener.getName().getString(), cap.getStrategy(), cap.getSpawnPosition(),
+                        listener.blockPosition(), listener.tickCount);
+            });
         }
 
         // 获取AI Capability
@@ -129,14 +148,25 @@ public class PerceptionEventHandler {
         LivingEntity observerEntity = event.getObserver();
         net.minecraft.world.entity.LivingEntity target = event.getTarget();
 
-        // 只处理Mob发现Player的情况
-        if (!(observerEntity instanceof Mob observer) || !(target instanceof Player player)) {
+        // 只处理Monster发现Player的情况
+        if (!(observerEntity instanceof net.minecraft.world.entity.monster.Monster observer) ||
+            !(target instanceof Player player)) {
             return;
         }
 
         // 服务端处理
         if (observer.level().isClientSide()) {
             return;
+        }
+
+        // 🔥 忽略创造模式玩家
+        if (LogicaConfig.IGNORE_CREATIVE_PLAYERS.get() && player.isCreative()) {
+            return;
+        }
+
+        // 🔥 首次发现玩家时，立即注册基础Goals
+        if (!observer.getPersistentData().getBoolean("logica_basic_goals_registered")) {
+            EntitySpawnHandler.registerBasicInvestigationGoals(observer);
         }
 
         // 获取AI Capability
@@ -157,11 +187,15 @@ public class PerceptionEventHandler {
             broadcastAlert(observer, player);
         }
 
-        // 切换到COMBAT状态
+        // 切换到COMBAT状态（只有首次进入COMBAT时记录日志）
+        AIState previousState = aiCap.getState();
         aiCap.setState(AIState.COMBAT);
 
-        Logica.LOGGER.debug("Mob {} spotted target {}, switching to COMBAT state",
-                observer.getName().getString(), player.getName().getString());
+        // 只在状态真正改变时记录日志
+        if (previousState != AIState.COMBAT) {
+            Logica.LOGGER.info("Mob {} spotted target {}, switching to COMBAT state (from {})",
+                    observer.getName().getString(), player.getName().getString(), previousState);
+        }
     }
 
     /**

@@ -47,6 +47,10 @@ public class SentriesGoal extends Goal {
     private int restCooldown;
     private boolean isResting;
 
+    // 返回中断位置标记
+    private boolean isReturningToInterruptedPosition;
+    private int returnFailureCount; // 返回失败计数器
+
     // DEBUG: 日志计数器
     private int logCounter;
 
@@ -99,7 +103,9 @@ public class SentriesGoal extends Goal {
     public boolean canContinueToUse() {
         IAICapability aiCap = mob.getCapability(AICapabilityProvider.AI_CAPABILITY).orElse(null);
         if (aiCap == null) {
-            Logica.LOGGER.warn("🔥 SentriesGoal.canContinueToUse() - No AI capability, stopping");
+            if (LogicaConfig.shouldLogGoalLifecycle()) {
+                Logica.LOGGER.warn("🔥 SentriesGoal.canContinueToUse() - No AI capability, stopping");
+            }
             return false;
         }
 
@@ -107,14 +113,18 @@ public class SentriesGoal extends Goal {
 
         // 如果状态改变，停止
         if (currentState != AIState.IDLE) {
-            Logica.LOGGER.info("🔥 SentriesGoal.canContinueToUse() - State changed to {}, STOPPING Goal",
-                    currentState);
+            if (LogicaConfig.shouldLogGoalLifecycle()) {
+                Logica.LOGGER.info("🔥 SentriesGoal.canContinueToUse() - State changed to {}, STOPPING Goal",
+                        currentState);
+            }
             return false;
         }
 
         // 如果策略改变，停止
         if (aiCap.getStrategy() != AIStrategy.SENTRIES) {
-            Logica.LOGGER.info("🔥 SentriesGoal.canContinueToUse() - Strategy changed, STOPPING Goal");
+            if (LogicaConfig.shouldLogGoalLifecycle()) {
+                Logica.LOGGER.info("🔥 SentriesGoal.canContinueToUse() - Strategy changed, STOPPING Goal");
+            }
             return false;
         }
 
@@ -126,35 +136,73 @@ public class SentriesGoal extends Goal {
      */
     @Override
     public void start() {
-        Logica.LOGGER.info("🔥 SentriesGoal.start() CALLED for {} (was resting: {})",
-                mob.getName().getString(), isResting);
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.info("🔥 SentriesGoal.start() CALLED for {} (was resting: {})",
+                    mob.getName().getString(), isResting);
+        }
 
         // 🔥 FIX: 重置休息状态（防止从其他Goal返回后卡在休息）
         this.restCooldown = 0;
         this.isResting = false;
+        this.isReturningToInterruptedPosition = false;
+        this.returnFailureCount = 0;
+
+        // 🔥 优先返回离开点（如果存在）
+        mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+            BlockPos interruptedPos = cap.getInterruptedPatrolPosition();
+            if (interruptedPos != null) {
+                if (LogicaConfig.shouldLogGoalLifecycle()) {
+                    Logica.LOGGER.info("Mob {} returning to interrupted patrol position: {}",
+                            mob.getName().getString(), interruptedPos);
+                }
+
+                net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(interruptedPos, 1);
+                if (path != null) {
+                    mob.getNavigation().moveTo(path, LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get());
+                    // 🔥 标记正在返回，但不清除离开点（等到达后再清除）
+                    this.isReturningToInterruptedPosition = true;
+                } else {
+                    // 🔥 无法创建路径，直接放弃返回
+                    if (LogicaConfig.shouldLogGoalLifecycle()) {
+                        Logica.LOGGER.warn("Mob {} cannot create path to interrupted position {}, giving up",
+                                mob.getName().getString(), interruptedPos);
+                    }
+                    cap.setInterruptedPatrolPosition(null);
+                }
+                return;
+            }
+        });
 
         if (waypoints != null && !waypoints.isEmpty()) {
-            Logica.LOGGER.info("Mob {} starting sentries patrol with {} waypoints",
-                    mob.getName().getString(), waypoints.size());
+            if (LogicaConfig.shouldLogGoalLifecycle()) {
+                Logica.LOGGER.info("Mob {} starting sentries patrol with {} waypoints",
+                        mob.getName().getString(), waypoints.size());
+            }
 
             // 立即开始前往第一个路径点
             BlockPos targetWaypoint = waypoints.get(currentWaypointIndex);
-            net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetWaypoint, 1);
+            net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetWaypoint, 0);
             boolean moveToSuccess = false;
             if (path != null) {
                 // 直接传入速度倍率，让导航系统自动处理
                 double speedMultiplier = LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get();
                 moveToSuccess = mob.getNavigation().moveTo(path, speedMultiplier);
 
-                Logica.LOGGER.info("🔥 moveTo() returned: {} (speed multiplier: {})",
-                        moveToSuccess, speedMultiplier);
+                if (LogicaConfig.shouldLogNavigation()) {
+                    Logica.LOGGER.info("🔥 moveTo() returned: {} (speed multiplier: {})",
+                            moveToSuccess, speedMultiplier);
+                }
             }
 
-            Logica.LOGGER.info("Mob {} starting navigation to first waypoint: {} (path: {}, moveTo: {})",
-                    mob.getName().getString(), targetWaypoint, path != null, moveToSuccess);
+            if (LogicaConfig.shouldLogNavigation()) {
+                Logica.LOGGER.info("Mob {} starting navigation to first waypoint: {} (path: {}, moveTo: {})",
+                        mob.getName().getString(), targetWaypoint, path != null, moveToSuccess);
+            }
         } else {
-            Logica.LOGGER.info("Mob {} starting sentries patrol in free-roam mode around {}",
-                    mob.getName().getString(), centerPosition);
+            if (LogicaConfig.shouldLogGoalLifecycle()) {
+                Logica.LOGGER.info("Mob {} starting sentries patrol in free-roam mode around {}",
+                        mob.getName().getString(), centerPosition);
+            }
         }
     }
 
@@ -163,15 +211,29 @@ public class SentriesGoal extends Goal {
      */
     @Override
     public void stop() {
-        Logica.LOGGER.info("🔥 SentriesGoal.stop() CALLED for {} (was resting: {})",
-                mob.getName().getString(), isResting);
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.info("🔥 SentriesGoal.stop() CALLED for {} (was resting: {})",
+                    mob.getName().getString(), isResting);
+        }
 
         mob.getNavigation().stop();
 
-        // 保存当前路径点索引
+        // 🔥 记录离开巡逻时的位置（只在首次被吸引离开时记录）
         mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
             if (waypoints != null && !waypoints.isEmpty()) {
                 cap.setCurrentWaypointIndex(currentWaypointIndex);
+            }
+
+            // 只在状态不是IDLE且没有已存在的离开点时才记录
+            // 这样可以避免返回途中再次被打断时覆盖原始离开点
+            if (cap.getState() != AIState.IDLE && cap.getInterruptedPatrolPosition() == null) {
+                BlockPos currentPos = mob.blockPosition();
+                cap.setInterruptedPatrolPosition(currentPos);
+
+                if (LogicaConfig.shouldLogGoalLifecycle()) {
+                    Logica.LOGGER.info("Mob {} interrupted from patrol at position: {} (state: {})",
+                            mob.getName().getString(), currentPos, cap.getState());
+                }
             }
         });
     }
@@ -182,7 +244,7 @@ public class SentriesGoal extends Goal {
     @Override
     public void tick() {
         // DEBUG: 每20 tick记录一次
-        if (++logCounter >= 20) {
+        if (LogicaConfig.shouldLogGoalLifecycle() && ++logCounter >= 20) {
             logCounter = 0;
 
             // 记录当前所有正在运行的Goals
@@ -191,11 +253,84 @@ public class SentriesGoal extends Goal {
                 runningGoals.append(goal.getGoal().getClass().getSimpleName()).append(", ");
             });
 
-            Logica.LOGGER.info("SentriesGoal.tick() - mob: {}, resting: {}, navigation: {}, pos: {}, running goals: [{}]",
-                    mob.getName().getString(), isResting,
+            Logica.LOGGER.info("SentriesGoal.tick() - mob: {}, resting: {}, returning: {}, navigation: {}, pos: {}, running goals: [{}]",
+                    mob.getName().getString(), isResting, isReturningToInterruptedPosition,
                     mob.getNavigation().isDone() ? "done" : "moving",
                     mob.blockPosition(),
                     runningGoals.toString());
+        } else if (!LogicaConfig.shouldLogGoalLifecycle()) {
+            // 🔥 如果日志关闭，重置计数器避免累积
+            logCounter = 0;
+        }
+
+        // 🔥 处理返回中断位置
+        if (isReturningToInterruptedPosition) {
+            mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+                BlockPos interruptedPos = cap.getInterruptedPatrolPosition();
+                if (interruptedPos != null) {
+                    Vec3 mobPos = mob.position();
+                    Vec3 targetPos = Vec3.atCenterOf(interruptedPos);
+                    double distance = mobPos.distanceTo(targetPos);
+
+                    // 到达离开点（距离<3格）
+                    if (distance < 3.0) {
+                        if (LogicaConfig.shouldLogNavigation()) {
+                            Logica.LOGGER.info("Mob {} reached interrupted position {}, clearing and resuming patrol",
+                                    mob.getName().getString(), interruptedPos);
+                        }
+
+                        // 清除离开点
+                        cap.setInterruptedPatrolPosition(null);
+                        isReturningToInterruptedPosition = false;
+                        returnFailureCount = 0;
+
+                        // 继续正常巡逻（不return，让下面的逻辑继续执行）
+                    } else {
+                        // 继续前往（如果导航完成，重新设置）
+                        if (mob.getNavigation().isDone()) {
+                            net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(interruptedPos, 1);
+                            if (path != null) {
+                                mob.getNavigation().moveTo(path, LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get());
+                                returnFailureCount = 0; // 成功创建路径，重置计数器
+                            } else {
+                                // 🔥 无法创建路径，增加失败计数
+                                returnFailureCount++;
+                                if (LogicaConfig.shouldLogNavigation()) {
+                                    Logica.LOGGER.warn("Mob {} failed to create path to interrupted position {} (attempt {}/10)",
+                                            mob.getName().getString(), interruptedPos, returnFailureCount);
+                                }
+
+                                // 🔥 失败10次后放弃返回
+                                if (returnFailureCount >= 10) {
+                                    if (LogicaConfig.shouldLogNavigation()) {
+                                        Logica.LOGGER.warn("Mob {} giving up returning to interrupted position {} after 10 failures",
+                                                mob.getName().getString(), interruptedPos);
+                                    }
+                                    cap.setInterruptedPatrolPosition(null);
+                                    isReturningToInterruptedPosition = false;
+                                    returnFailureCount = 0;
+                                    // 不return，让下面的逻辑继续执行（切换到正常巡逻）
+                                } else {
+                                    return; // 继续尝试
+                                }
+                            }
+                        } else {
+                            return; // 导航未完成，继续等待
+                        }
+                    }
+                } else {
+                    // 离开点不存在了，取消返回状态
+                    isReturningToInterruptedPosition = false;
+                    returnFailureCount = 0;
+                }
+            });
+
+            // 🔥 如果没有return，说明已经到达或放弃，继续执行下面的正常巡逻逻辑
+            if (!isReturningToInterruptedPosition) {
+                // 继续执行正常巡逻（不return）
+            } else {
+                return; // 仍在返回途中，阻止正常巡逻
+            }
         }
 
         // 休息逻辑
@@ -236,38 +371,44 @@ public class SentriesGoal extends Goal {
 
         double distance = mobPos.distanceTo(waypointPos);
 
-        // 到达路径点
-        if (distance < 2.0) {
+        // 到达路径点（距离判定1.0格，acceptableRadius设为0以避免提前停止）
+        if (distance < 1.0) {
             // 标记为已访问
             visitedWaypoints.add(targetWaypoint);
 
             // 如果所有路径点都访问过，清空记录重新开始
             if (visitedWaypoints.size() >= waypoints.size()) {
                 visitedWaypoints.clear();
-                Logica.LOGGER.info("Mob {} completed sentries circuit, restarting",
-                        mob.getName().getString());
+                if (LogicaConfig.shouldLogNavigation()) {
+                    Logica.LOGGER.info("Mob {} completed sentries circuit, restarting",
+                            mob.getName().getString());
+                }
             }
 
             // 选择下一个路径点（优先未访问的）
             selectNextWaypoint();
 
-            Logica.LOGGER.info("Mob {} reached waypoint {}, moving to next: {}",
-                    mob.getName().getString(), currentWaypointIndex,
-                    waypoints.get(currentWaypointIndex));
+            if (LogicaConfig.shouldLogNavigation()) {
+                Logica.LOGGER.info("Mob {} reached waypoint {}, moving to next: {}",
+                        mob.getName().getString(), currentWaypointIndex,
+                        waypoints.get(currentWaypointIndex));
+            }
         }
 
         // 前往当前目标路径点（如果导航完成或失败，重新设置）
         if (mob.getNavigation().isDone()) {
             targetWaypoint = waypoints.get(currentWaypointIndex);
-            net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetWaypoint, 1);
+            net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetWaypoint, 0);
             boolean success = false;
             if (path != null) {
                 success = mob.getNavigation().moveTo(path, LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get());
             }
 
             if (!success) {
-                Logica.LOGGER.warn("Mob {} failed to navigate to waypoint {}, skipping",
-                        mob.getName().getString(), targetWaypoint);
+                if (LogicaConfig.shouldLogNavigation()) {
+                    Logica.LOGGER.warn("Mob {} failed to navigate to waypoint {}, skipping",
+                            mob.getName().getString(), targetWaypoint);
+                }
                 // 跳到下一个路径点
                 selectNextWaypoint();
             }
@@ -321,8 +462,10 @@ public class SentriesGoal extends Goal {
                 mob.getNavigation().moveTo(path, LogicaConfig.SENTRIES_SPEED_MULTIPLIER.get());
             }
 
-            Logica.LOGGER.debug("Mob {} choosing new sentries target at distance {} from center: {}",
-                    mob.getName().getString(), distance, targetPos);
+            if (LogicaConfig.shouldLogNavigation()) {
+                Logica.LOGGER.debug("Mob {} choosing new sentries target at distance {} from center: {}",
+                        mob.getName().getString(), distance, targetPos);
+            }
         }
     }
 

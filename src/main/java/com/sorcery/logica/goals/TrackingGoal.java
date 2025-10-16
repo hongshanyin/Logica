@@ -96,8 +96,10 @@ public class TrackingGoal extends Goal {
         if (trackingTimer >= maxDuration) {
             // 超时，进入SEARCHING状态
             aiCap.setState(AIState.SEARCHING);
-            Logica.LOGGER.debug("Mob {} tracking timeout, switching to SEARCHING",
-                    mob.getName().getString());
+            if (LogicaConfig.shouldLogStateTransitions()) {
+                Logica.LOGGER.debug("Mob {} tracking timeout, switching to SEARCHING",
+                        mob.getName().getString());
+            }
             return false;
         }
 
@@ -109,8 +111,10 @@ public class TrackingGoal extends Goal {
      */
     @Override
     public void start() {
-        Logica.LOGGER.debug("Mob {} starting tracking mode at {}",
-                mob.getName().getString(), lastSoundPosition);
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.debug("Mob {} starting tracking mode at {}",
+                    mob.getName().getString(), lastSoundPosition);
+        }
 
         // 前往最后已知位置
         navigateToLastSound();
@@ -150,9 +154,10 @@ public class TrackingGoal extends Goal {
 
             // 到达位置但没有发现目标
             if (distance < 3.0) {
-                // 停留一段时间，等待新的声音
+                // 🔥 改进: 到达后在附近游荡,而不是站着不动
                 if (mob.getNavigation().isDone()) {
-                    // 已经到达，等待新的声音信号
+                    // 在最后位置周围随机游荡
+                    wanderAroundLastPosition();
                 }
             } else {
                 // 继续前往
@@ -175,7 +180,12 @@ public class TrackingGoal extends Goal {
         List<Player> nearbyPlayers = mob.level().getEntitiesOfClass(Player.class, searchBox);
 
         for (Player player : nearbyPlayers) {
-            if (player.isSpectator() || player.isCreative()) {
+            if (player.isSpectator()) {
+                continue;
+            }
+
+            // 🔥 忽略创造模式玩家
+            if (LogicaConfig.IGNORE_CREATIVE_PLAYERS.get() && player.isCreative()) {
                 continue;
             }
 
@@ -188,8 +198,10 @@ public class TrackingGoal extends Goal {
                 cap.setTrackingTicks(0);
             });
 
-            Logica.LOGGER.debug("Mob {} collision detected, reacquiring target {}",
-                    mob.getName().getString(), player.getName().getString());
+            if (LogicaConfig.shouldLogStateTransitions()) {
+                Logica.LOGGER.debug("Mob {} collision detected, reacquiring target {}",
+                        mob.getName().getString(), player.getName().getString());
+            }
 
             return true;
         }
@@ -221,6 +233,35 @@ public class TrackingGoal extends Goal {
     }
 
     /**
+     * 在最后位置周围游荡
+     *
+     * 模拟原版RandomStrollGoal的行为:
+     * - 在最后已知位置附近随机选择目标
+     * - 使用原版速度移动
+     */
+    private void wanderAroundLastPosition() {
+        if (lastSoundPosition == null) {
+            return;
+        }
+
+        // 在最后位置周围10格范围内随机选择目标
+        double offsetX = (mob.getRandom().nextDouble() - 0.5) * 20.0;  // -10 to +10
+        double offsetZ = (mob.getRandom().nextDouble() - 0.5) * 20.0;
+
+        BlockPos wanderTarget = new BlockPos(
+            (int)(lastSoundPosition.getX() + offsetX),
+            lastSoundPosition.getY(),
+            (int)(lastSoundPosition.getZ() + offsetZ)
+        );
+
+        net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(wanderTarget, 1);
+        if (path != null) {
+            // 使用原版速度游荡 (不是追踪速度)
+            mob.getNavigation().moveTo(path, mob.getSpeed());
+        }
+    }
+
+    /**
      * 监听声音事件（TRACKING状态下积极响应）
      */
     @SubscribeEvent
@@ -236,6 +277,24 @@ public class TrackingGoal extends Goal {
             return;
         }
 
+        // 🔥 过滤声音来源：忽略其他怪物产生的声音（只追踪玩家的声音）
+        net.minecraft.world.entity.Entity sourceEntity = event.getSourceEntity();
+        if (sourceEntity != null && sourceEntity instanceof Mob) {
+            // 声音来自其他怪物（如绵羊、鸡等），忽略
+            if (LogicaConfig.shouldLogPerceptionEvents()) {
+                Logica.LOGGER.debug("Mob {} ignored sound from {} (not a player)",
+                        mob.getName().getString(), sourceEntity.getName().getString());
+            }
+            return;
+        }
+
+        // 🔥 忽略创造模式玩家的声音
+        if (LogicaConfig.IGNORE_CREATIVE_PLAYERS.get() && sourceEntity instanceof Player player) {
+            if (player.isCreative()) {
+                return;
+            }
+        }
+
         // 更新目标位置
         Vec3 sourcePos = event.getSourcePos();
         this.lastSoundPosition = new BlockPos((int)sourcePos.x, (int)sourcePos.y, (int)sourcePos.z);
@@ -249,8 +308,10 @@ public class TrackingGoal extends Goal {
         // 重置追踪计时器（延长追踪时间）
         this.trackingTimer = Math.max(0, trackingTimer - 100);
 
-        Logica.LOGGER.debug("Mob {} tracking new sound at {}, timer reset",
-                mob.getName().getString(), lastSoundPosition);
+        if (LogicaConfig.shouldLogPerceptionEvents()) {
+            Logica.LOGGER.debug("Mob {} tracking new sound at {}, timer reset",
+                    mob.getName().getString(), lastSoundPosition);
+        }
     }
 
     /**

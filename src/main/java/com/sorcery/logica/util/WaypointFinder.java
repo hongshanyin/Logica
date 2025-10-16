@@ -3,6 +3,7 @@ package com.sorcery.logica.util;
 import com.sorcery.logica.Logica;
 import com.sorcery.logica.ai.AIStrategy;
 import com.sorcery.logica.blocks.*;
+import com.sorcery.logica.config.LogicaConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
@@ -29,20 +30,17 @@ public class WaypointFinder {
      * @return 排序后的路径点列表
      */
     public static List<BlockPos> findWaypoints(Level level, BlockPos strategyPos, AIStrategy strategy, int teamId) {
-        Logica.LOGGER.info("Finding waypoints for {} strategy with team ID {}", strategy, teamId);
-
-        // 巡逻策略：使用半径搜索（16格内所有同编号路径点，不需要相连）
-        if (strategy == AIStrategy.PATROL) {
-            return findWaypointsInRadius(level, strategyPos, strategy, teamId);
+        if (LogicaConfig.shouldLogWaypointSearch()) {
+            Logica.LOGGER.info("Finding waypoints for {} strategy with team ID {}", strategy, teamId);
         }
 
-        // 哨兵策略：使用BFS搜索（相连的路径点）
+        // 所有策略都使用BFS搜索相连的路径点
         return findConnectedWaypoints(level, strategyPos, strategy, teamId);
     }
 
     /**
      * 半径搜索路径点（巡逻策略专用）
-     * 搜索标记方块16格半径内所有同编号路径点，不需要相连
+     * 搜索标记方块指定半径内所有同编号路径点，不需要相连
      */
     private static List<BlockPos> findWaypointsInRadius(Level level, BlockPos strategyPos, AIStrategy strategy, int teamId) {
         Block waypointBlock = getWaypointBlock(strategy);
@@ -51,7 +49,12 @@ public class WaypointFinder {
         }
 
         List<BlockPos> waypoints = new ArrayList<>();
-        int searchRadius = 16; // 固定16格半径
+        int searchRadius = LogicaConfig.PATROL_WAYPOINT_SEARCH_RADIUS.get().intValue();
+
+        if (LogicaConfig.shouldLogWaypointSearch()) {
+            Logica.LOGGER.info("Searching patrol waypoints within {} blocks radius from {}",
+                    searchRadius, strategyPos);
+        }
 
         // 扫描以策略标记为中心的立方体区域
         for (int dx = -searchRadius; dx <= searchRadius; dx++) {
@@ -67,8 +70,10 @@ public class WaypointFinder {
                         BlockPos groundPos = findGroundBelow(level, checkPos);
                         waypoints.add(groundPos);
 
-                        Logica.LOGGER.debug("Found patrol waypoint at {} (adjusted from {})",
-                                groundPos, checkPos);
+                        if (LogicaConfig.shouldLogWaypointSearch()) {
+                            Logica.LOGGER.debug("Found patrol waypoint at {} (adjusted from {})",
+                                    groundPos, checkPos);
+                        }
                     }
                 }
             }
@@ -79,14 +84,22 @@ public class WaypointFinder {
                 .thenComparingInt(BlockPos::getX)
                 .thenComparingInt(BlockPos::getZ));
 
-        Logica.LOGGER.info("Found {} patrol waypoints within {} blocks radius",
-                waypoints.size(), searchRadius);
+        if (LogicaConfig.shouldLogWaypointSearch()) {
+            Logica.LOGGER.info("Found {} patrol waypoints within {} blocks radius",
+                    waypoints.size(), searchRadius);
+        }
 
         return waypoints;
     }
 
     /**
-     * BFS搜索相连的路径点（哨兵策略专用）
+     * BFS搜索相连的路径点
+     *
+     * 搜索策略：
+     * 1. 从策略标记方块开始
+     * 2. 检查相邻1格的路径点（直接相连）
+     * 3. 从每个路径点继续搜索周围指定半径内的下一个路径点
+     * 4. 支持路径点之间有间隔（通过搜索半径连接）
      */
     private static List<BlockPos> findConnectedWaypoints(Level level, BlockPos strategyPos, AIStrategy strategy, int teamId) {
         Block waypointBlock = getWaypointBlock(strategy);
@@ -98,8 +111,23 @@ public class WaypointFinder {
         Set<BlockPos> visited = new HashSet<>();
         Queue<BlockPos> queue = new LinkedList<>();
 
+        // 🔥 根据策略获取路径点搜索半径
+        int waypointSearchRadius;
+        if (strategy == AIStrategy.PATROL) {
+            waypointSearchRadius = LogicaConfig.PATROL_WAYPOINT_SEARCH_RADIUS.get().intValue();
+        } else if (strategy == AIStrategy.SENTRIES) {
+            waypointSearchRadius = LogicaConfig.SENTRIES_WAYPOINT_SEARCH_RADIUS.get().intValue();
+        } else {
+            waypointSearchRadius = 1; // 默认只检查直接相邻
+        }
+
         queue.add(strategyPos);
         visited.add(strategyPos);
+
+        if (LogicaConfig.shouldLogWaypointSearch()) {
+            Logica.LOGGER.info("Starting BFS waypoint search for {} from {} with search radius {}",
+                    strategy, strategyPos, waypointSearchRadius);
+        }
 
         // BFS搜索相连的路径点
         while (!queue.isEmpty()) {
@@ -109,29 +137,51 @@ public class WaypointFinder {
             BlockState currentState = level.getBlockState(current);
             Block currentBlock = currentState.getBlock();
 
-            if (isMatchingWaypoint(currentBlock, waypointBlock, teamId)) {
+            boolean isWaypoint = isMatchingWaypoint(currentBlock, waypointBlock, teamId);
+            if (isWaypoint) {
                 // 🔥 高度调整：将路径点调整到地面
                 BlockPos groundPos = findGroundBelow(level, current);
                 waypoints.add(groundPos);
 
-                Logica.LOGGER.debug("Found waypoint at {} (adjusted from {})",
-                    groundPos, current);
+                if (LogicaConfig.shouldLogWaypointSearch()) {
+                    Logica.LOGGER.debug("Found waypoint at {} (adjusted from {})",
+                            groundPos, current);
+                }
             }
 
-            // 检查6个方向的相邻方块
-            for (Direction dir : Direction.values()) {
-                BlockPos neighbor = current.relative(dir);
+            // 🔥 搜索策略：
+            // - 如果是策略标记方块：只检查直接相邻（1格）的路径点
+            // - 如果是路径点方块：检查周围半径内的下一个路径点
+            boolean isMarker = isMatchingStrategyMarker(currentBlock, strategy, teamId);
+            int searchRadius = isMarker ? 1 : waypointSearchRadius;
 
-                if (!visited.contains(neighbor)) {
-                    BlockState neighborState = level.getBlockState(neighbor);
-                    Block neighborBlock = neighborState.getBlock();
+            // 在指定半径内搜索相连的方块
+            for (int dx = -searchRadius; dx <= searchRadius; dx++) {
+                for (int dy = -searchRadius; dy <= searchRadius; dy++) {
+                    for (int dz = -searchRadius; dz <= searchRadius; dz++) {
+                        // 跳过中心点
+                        if (dx == 0 && dy == 0 && dz == 0) {
+                            continue;
+                        }
 
-                    // 如果是相同编号的路径点或策略方块，继续搜索
-                    if (isMatchingWaypoint(neighborBlock, waypointBlock, teamId) ||
-                        isMatchingStrategyMarker(neighborBlock, strategy, teamId)) {
+                        BlockPos neighbor = current.offset(dx, dy, dz);
 
-                        queue.add(neighbor);
-                        visited.add(neighbor);
+                        if (!visited.contains(neighbor)) {
+                            BlockState neighborState = level.getBlockState(neighbor);
+                            Block neighborBlock = neighborState.getBlock();
+
+                            // 只搜索路径点（不再搜索标记方块，避免回路）
+                            if (isMatchingWaypoint(neighborBlock, waypointBlock, teamId)) {
+                                queue.add(neighbor);
+                                visited.add(neighbor);
+
+                                if (LogicaConfig.shouldLogWaypointSearch()) {
+                                    double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                                    Logica.LOGGER.debug("Connected waypoint {} to {} (distance: {:.1f})",
+                                            current, neighbor, distance);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -141,6 +191,10 @@ public class WaypointFinder {
         waypoints.sort(Comparator.<BlockPos>comparingInt(BlockPos::getY)
                 .thenComparingInt(BlockPos::getX)
                 .thenComparingInt(BlockPos::getZ));
+
+        if (LogicaConfig.shouldLogWaypointSearch()) {
+            Logica.LOGGER.info("BFS completed: found {} waypoints", waypoints.size());
+        }
 
         return waypoints;
     }

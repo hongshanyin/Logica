@@ -42,6 +42,7 @@ public class    LogicaConfig {
     public static final ForgeConfigSpec.DoubleValue SENTRIES_RADIUS;
     public static final ForgeConfigSpec.DoubleValue SENTRIES_SPEED_MULTIPLIER;
     public static final ForgeConfigSpec.DoubleValue SENTRIES_REST_CHANCE;
+    public static final ForgeConfigSpec.DoubleValue SENTRIES_WAYPOINT_SEARCH_RADIUS;
     public static final ForgeConfigSpec.DoubleValue PATROL_SPEED_MULTIPLIER;
     public static final ForgeConfigSpec.DoubleValue PATROL_SEARCH_RADIUS;
     public static final ForgeConfigSpec.DoubleValue PATROL_WAYPOINT_SEARCH_RADIUS;
@@ -60,6 +61,10 @@ public class    LogicaConfig {
     public static final ForgeConfigSpec.DoubleValue TRACKING_COLLISION_RADIUS;
     public static final ForgeConfigSpec.DoubleValue TRACKING_SPEED_MULTIPLIER;
 
+    // ==================== 玩家检测 ====================
+
+    public static final ForgeConfigSpec.BooleanValue IGNORE_CREATIVE_PLAYERS;
+
     // ==================== 日志系统 ====================
 
     public static final ForgeConfigSpec.BooleanValue ENABLE_DEBUG_LOGS;
@@ -70,7 +75,57 @@ public class    LogicaConfig {
     public static final ForgeConfigSpec.BooleanValue LOG_WAYPOINT_SEARCH;
     public static final ForgeConfigSpec.BooleanValue LOG_STRATEGY_APPLICATION;
 
-    // ==================== 辅助方法 ====================
+    // ==================== 日志辅助方法 ====================
+
+    /**
+     * 检查是否应该记录Goal生命周期日志
+     * @return 总开关启用 && Goal生命周期日志启用
+     */
+    public static boolean shouldLogGoalLifecycle() {
+        return ENABLE_DEBUG_LOGS.get() && LOG_GOAL_LIFECYCLE.get();
+    }
+
+    /**
+     * 检查是否应该记录状态转换日志
+     * @return 总开关启用 && 状态转换日志启用
+     */
+    public static boolean shouldLogStateTransitions() {
+        return ENABLE_DEBUG_LOGS.get() && LOG_STATE_TRANSITIONS.get();
+    }
+
+    /**
+     * 检查是否应该记录导航日志
+     * @return 总开关启用 && 导航日志启用
+     */
+    public static boolean shouldLogNavigation() {
+        return ENABLE_DEBUG_LOGS.get() && LOG_NAVIGATION.get();
+    }
+
+    /**
+     * 检查是否应该记录感知事件日志
+     * @return 总开关启用 && 感知事件日志启用
+     */
+    public static boolean shouldLogPerceptionEvents() {
+        return ENABLE_DEBUG_LOGS.get() && LOG_PERCEPTION_EVENTS.get();
+    }
+
+    /**
+     * 检查是否应该记录路径点搜索日志
+     * @return 总开关启用 && 路径点搜索日志启用
+     */
+    public static boolean shouldLogWaypointSearch() {
+        return ENABLE_DEBUG_LOGS.get() && LOG_WAYPOINT_SEARCH.get();
+    }
+
+    /**
+     * 检查是否应该记录策略应用日志
+     * @return 总开关启用 && 策略应用日志启用
+     */
+    public static boolean shouldLogStrategyApplication() {
+        return ENABLE_DEBUG_LOGS.get() && LOG_STRATEGY_APPLICATION.get();
+    }
+
+    // ==================== 配置解析辅助方法 ====================
 
     /**
      * 解析事件调查时长配置
@@ -217,6 +272,14 @@ public class    LogicaConfig {
                 .comment("Sentries rest chance per tick (0.0 - 1.0, default: 0.1)")
                 .defineInRange("sentriesRestChance", 0.1, 0.0, 1.0);
 
+        SENTRIES_WAYPOINT_SEARCH_RADIUS = BUILDER
+                .comment(
+                        "Sentries waypoint chain search radius (blocks, default: 1)",
+                        "Sentries waypoints must be directly adjacent (1 block apart)",
+                        "This ensures tight patrol routes"
+                )
+                .defineInRange("sentriesWaypointSearchRadius", 1.0, 1.0, 5.0);
+
         PATROL_SPEED_MULTIPLIER = BUILDER
                 .comment("Patrol movement speed multiplier (default: 1.2 = 20% faster)")
                 .defineInRange("patrolSpeedMultiplier", 1.2, 0.5, 2.0);
@@ -226,8 +289,12 @@ public class    LogicaConfig {
                 .defineInRange("patrolSearchRadius", 8.0, 2.0, 16.0);
 
         PATROL_WAYPOINT_SEARCH_RADIUS = BUILDER
-                .comment("Patrol waypoint search radius from marker (blocks, default: 16.0)")
-                .defineInRange("patrolWaypointSearchRadius", 16.0, 8.0, 32.0);
+                .comment(
+                        "Patrol waypoint chain search radius (blocks, default: 16.0)",
+                        "Each waypoint can connect to next waypoint within this radius",
+                        "Allows sparse waypoint placement for long patrol routes"
+                )
+                .defineInRange("patrolWaypointSearchRadius", 16.0, 8.0, 64.0);
 
         STUCK_DETECTION_THRESHOLD = BUILDER
                 .comment("Stuck detection threshold in ticks (60 = 3 seconds)")
@@ -264,6 +331,19 @@ public class    LogicaConfig {
         TRACKING_SPEED_MULTIPLIER = BUILDER
                 .comment("Movement speed multiplier during tracking (default: 1.0)")
                 .defineInRange("trackingSpeedMultiplier", 1.0, 0.5, 3.0);
+        BUILDER.pop();
+
+        BUILDER.push("Player Detection");
+        IGNORE_CREATIVE_PLAYERS = BUILDER
+                .comment(
+                        "Ignore players in Creative mode (default: true)",
+                        "When enabled, mobs will not react to creative mode players:",
+                        "  - No visual detection (TargetSpottedEvent ignored)",
+                        "  - No sound detection (VibrationPerceivedEvent ignored)",
+                        "  - No collision detection during tracking",
+                        "Recommended: true (vanilla-like behavior)"
+                )
+                .define("ignoreCreativePlayers", true);
         BUILDER.pop();
 
         BUILDER.push("Logging");

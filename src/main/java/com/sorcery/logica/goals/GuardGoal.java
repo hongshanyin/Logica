@@ -40,6 +40,10 @@ public class GuardGoal extends Goal {
     // 游荡计时器
     private int wanderCooldown;
 
+    // 返回中断位置标记
+    private boolean isReturningToInterruptedPosition;
+    private int returnFailureCount; // 返回失败计数器
+
     public GuardGoal(Mob mob) {
         this.mob = mob;
         this.setFlags(EnumSet.of(Flag.MOVE));
@@ -105,9 +109,38 @@ public class GuardGoal extends Goal {
         this.lastPosition = mob.position();
         this.stuckTicks = 0;
         this.wanderCooldown = 0;
+        this.isReturningToInterruptedPosition = false;
+        this.returnFailureCount = 0;
 
-        Logica.LOGGER.info("🔥 GuardGoal.start() CALLED for {} at home position {}",
-                mob.getName().getString(), homePosition);
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.info("🔥 GuardGoal.start() CALLED for {} at home position {}",
+                    mob.getName().getString(), homePosition);
+        }
+
+        // 🔥 优先返回离开点（如果存在）
+        mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+            BlockPos interruptedPos = cap.getInterruptedPatrolPosition();
+            if (interruptedPos != null) {
+                if (LogicaConfig.shouldLogGoalLifecycle()) {
+                    Logica.LOGGER.info("Mob {} returning to interrupted guard position: {}",
+                            mob.getName().getString(), interruptedPos);
+                }
+
+                net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(interruptedPos, 1);
+                if (path != null) {
+                    mob.getNavigation().moveTo(path, LogicaConfig.GUARD_SPEED_MULTIPLIER.get());
+                    // 🔥 标记正在返回，但不清除离开点（等到达后再清除）
+                    this.isReturningToInterruptedPosition = true;
+                } else {
+                    // 🔥 无法创建路径，直接放弃返回
+                    if (LogicaConfig.shouldLogGoalLifecycle()) {
+                        Logica.LOGGER.warn("Mob {} cannot create path to interrupted position {}, giving up",
+                                mob.getName().getString(), interruptedPos);
+                    }
+                    cap.setInterruptedPatrolPosition(null);
+                }
+            }
+        });
     }
 
     /**
@@ -117,6 +150,21 @@ public class GuardGoal extends Goal {
     public void stop() {
         mob.getNavigation().stop();
         this.lastPosition = null;
+
+        // 🔥 记录离开守卫时的位置（只在首次被吸引离开时记录）
+        mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+            // 只在状态不是IDLE且没有已存在的离开点时才记录
+            // 这样可以避免返回途中再次被打断时覆盖原始离开点
+            if (cap.getState() != AIState.IDLE && cap.getInterruptedPatrolPosition() == null) {
+                BlockPos currentPos = mob.blockPosition();
+                cap.setInterruptedPatrolPosition(currentPos);
+
+                if (LogicaConfig.shouldLogGoalLifecycle()) {
+                    Logica.LOGGER.info("Mob {} interrupted from guard at position: {} (state: {})",
+                            mob.getName().getString(), currentPos, cap.getState());
+                }
+            }
+        });
     }
 
     /**
@@ -126,6 +174,71 @@ public class GuardGoal extends Goal {
     public void tick() {
         if (homePosition == null) {
             return;
+        }
+
+        // 🔥 处理返回中断位置
+        if (isReturningToInterruptedPosition) {
+            mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+                BlockPos interruptedPos = cap.getInterruptedPatrolPosition();
+                if (interruptedPos != null) {
+                    Vec3 mobPos = mob.position();
+                    Vec3 targetPos = Vec3.atCenterOf(interruptedPos);
+                    double distance = mobPos.distanceTo(targetPos);
+
+                    // 到达离开点（距离<3格）
+                    if (distance < 3.0) {
+                        if (LogicaConfig.shouldLogNavigation()) {
+                            Logica.LOGGER.info("Mob {} reached interrupted position {}, clearing and resuming guard",
+                                    mob.getName().getString(), interruptedPos);
+                        }
+
+                        // 清除离开点
+                        cap.setInterruptedPatrolPosition(null);
+                        isReturningToInterruptedPosition = false;
+                        returnFailureCount = 0;
+
+                        // 继续正常守卫（不return，让下面的逻辑继续执行）
+                    } else {
+                        // 继续前往（如果导航完成，重新设置）
+                        if (mob.getNavigation().isDone()) {
+                            net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(interruptedPos, 1);
+                            if (path != null) {
+                                mob.getNavigation().moveTo(path, LogicaConfig.GUARD_SPEED_MULTIPLIER.get());
+                                returnFailureCount = 0; // 成功创建路径，重置计数器
+                            } else {
+                                // 🔥 无法创建路径，增加失败计数
+                                returnFailureCount++;
+                                if (LogicaConfig.shouldLogNavigation()) {
+                                    Logica.LOGGER.warn("Mob {} failed to create path to interrupted position {} (attempt {}/10)",
+                                            mob.getName().getString(), interruptedPos, returnFailureCount);
+                                }
+
+                                // 🔥 失败10次后放弃返回
+                                if (returnFailureCount >= 10) {
+                                    if (LogicaConfig.shouldLogNavigation()) {
+                                        Logica.LOGGER.warn("Mob {} giving up returning to interrupted position {} after 10 failures",
+                                                mob.getName().getString(), interruptedPos);
+                                    }
+                                    cap.setInterruptedPatrolPosition(null);
+                                    isReturningToInterruptedPosition = false;
+                                    returnFailureCount = 0;
+                                    // 继续正常守卫（不return）
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // 离开点不存在了，取消返回状态
+                    isReturningToInterruptedPosition = false;
+                    returnFailureCount = 0;
+                }
+            });
+
+            // 🔥 如果没有放弃，继续返回模式
+            if (isReturningToInterruptedPosition) {
+                return; // 阻止正常守卫
+            }
+            // 否则继续执行下面的正常守卫逻辑
         }
 
         double guardRadius = LogicaConfig.GUARD_RADIUS.get();
@@ -141,8 +254,10 @@ public class GuardGoal extends Goal {
                 mob.getNavigation().moveTo(path, LogicaConfig.GUARD_SPEED_MULTIPLIER.get());
             }
 
-            Logica.LOGGER.debug("Mob {} too far from home ({}), returning",
-                    mob.getName().getString(), distanceToHome);
+            if (LogicaConfig.shouldLogNavigation()) {
+                Logica.LOGGER.debug("Mob {} too far from home ({}), returning",
+                        mob.getName().getString(), distanceToHome);
+            }
 
             return;
         }
@@ -213,8 +328,10 @@ public class GuardGoal extends Goal {
      * 脱困逻辑
      */
     private void resolveStuck() {
-        Logica.LOGGER.debug("Mob {} detected stuck, attempting to unstuck",
-                mob.getName().getString());
+        if (LogicaConfig.shouldLogNavigation()) {
+            Logica.LOGGER.debug("Mob {} detected stuck, attempting to unstuck",
+                    mob.getName().getString());
+        }
 
         // 停止当前导航
         mob.getNavigation().stop();

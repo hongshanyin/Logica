@@ -24,225 +24,170 @@ import java.util.List;
  * - 检测实体周围3x3x3范围的策略标记方块
  * - 自动应用对应的AI策略
  * - 搜索并记录路径点
+ *
+ * 性能优化：
+ * - 缓存世界中是否存在策略方块，避免重复检测
+ * - 没有策略方块的世界直接跳过所有处理
+ * - 普通怪物延迟注册Goals（懒加载）
  */
 @Mod.EventBusSubscriber(modid = Logica.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class EntitySpawnHandler {
 
+
     /**
-     * 实体加入世界时检测策略标记方块
+     * 实体加入世界时的处理
+     *
+     * 功能：
+     * 1. 为新生成的实体：延迟注册Goals（由BlockEventHandler或PerceptionEventHandler处理）
+     * 2. 为重新加载的实体：检查Capability并重新注册Goals（恢复保存的策略）
      */
     @SubscribeEvent
     public static void onEntityJoinLevel(EntityJoinLevelEvent event) {
-        // DEBUG: 记录所有实体加入事件
-        if (event.getLevel().isClientSide()) return;
+        // 只处理服务端
+        if (event.getLevel().isClientSide()) {
+            return;
+        }
 
-        if (!(event.getEntity() instanceof Mob mob)) return;
+        // 只处理Mob
+        if (!(event.getEntity() instanceof Mob mob)) {
+            return;
+        }
 
-        // DEBUG: 记录检测到的Mob
-        Logica.LOGGER.info("Detecting Mob spawn: {} at {}",
-                mob.getName().getString(), mob.blockPosition());
+        // 检查是否有保存的策略数据（重新加载的实体）
+        mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(aiCap -> {
+            AIStrategy strategy = aiCap.getStrategy();
 
-        BlockPos mobPos = mob.blockPosition();
-        Level level = mob.level();
+            // 情况1：策略怪物（GUARD/SENTRIES/PATROL）
+            if (strategy != AIStrategy.NONE) {
+                // 检查Goals是否已存在（通过检查Goal列表）
+                boolean hasStrategyGoals = mob.goalSelector.getAvailableGoals().stream()
+                        .anyMatch(goal -> {
+                            String name = goal.getGoal().getClass().getSimpleName();
+                            return name.equals("GuardGoal") ||
+                                   name.equals("SentriesGoal") ||
+                                   name.equals("PatrolGoal");
+                        });
 
-        // 扫描3x3x3范围查找策略标记方块
-        AIStrategy strategy = null;
-        BlockPos strategyMarkerPos = null;
-        int areaTeam = 0; // 区域编号
+                if (!hasStrategyGoals) {
+                    Logica.LOGGER.info("Restoring strategy {} goals for reloaded entity: {}",
+                            strategy, mob.getName().getString());
 
-        Logica.LOGGER.debug("Scanning 3x3x3 area around {} for strategy markers...", mobPos);
+                    // 根据策略重新注册Goals
+                    registerStrategyGoals(mob, strategy);
 
-        outerLoop:
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    BlockPos checkPos = mobPos.offset(dx, dy, dz);
-                    BlockState state = level.getBlockState(checkPos);
-                    Block block = state.getBlock();
-
-                    if (block instanceof GuardMarkerBlock) {
-                        strategy = AIStrategy.GUARD;
-                        strategyMarkerPos = checkPos;
-                        areaTeam = 0; // Guard不使用区域编号
-                        Logica.LOGGER.info("Found GUARD marker at {}", checkPos);
-                        break outerLoop;
-                    } else if (block instanceof SentriesMarkerBlock sentries) {
-                        strategy = AIStrategy.SENTRIES;
-                        strategyMarkerPos = checkPos;
-                        areaTeam = sentries.getTeamId();
-                        Logica.LOGGER.info("Found SENTRIES marker (team {}) at {}", areaTeam, checkPos);
-                        break outerLoop;
-                    } else if (block instanceof PatrolMarkerBlock patrol) {
-                        strategy = AIStrategy.PATROL;
-                        strategyMarkerPos = checkPos;
-                        areaTeam = patrol.getTeamId();
-                        Logica.LOGGER.info("Found PATROL marker (team {}) at {}", areaTeam, checkPos);
-                        break outerLoop;
-                    }
+                    // 标记已注册（用于其他系统判断）
+                    mob.getPersistentData().putBoolean("logica_strategy_goals_registered", true);
+                    mob.getPersistentData().putBoolean("logica_basic_goals_registered", true);
                 }
             }
-        }
+            // 情况2：基础策略怪物（只有 InvestigateGoal 和 SearchingGoal）
+            else if (aiCap.hasBasicGoals()) {
+                // 检查是否有基础Goals（通过检查Goal列表）
+                boolean hasInvestigateGoal = mob.goalSelector.getAvailableGoals().stream()
+                        .anyMatch(goal -> goal.getGoal().getClass().getSimpleName().equals("InvestigateGoal"));
 
-        // 应用策略
-        if (strategy != null) {
-            applyStrategy(mob, strategy, strategyMarkerPos, level, areaTeam);
-        } else {
-            Logica.LOGGER.debug("No strategy marker found near {}", mob.getName().getString());
-            // 即使没有策略，也注册基础的调查Goals（响应声音诱饵）
-            registerBasicInvestigationGoals(mob);
-        }
-    }
+                // 如果没有InvestigateGoal，说明需要恢复
+                if (!hasInvestigateGoal) {
+                    Logica.LOGGER.info("Restoring basic investigation goals for reloaded entity: {}",
+                            mob.getName().getString());
 
-    /**
-     * 应用AI策略到实体
-     */
-    private static void applyStrategy(Mob mob, AIStrategy strategy, BlockPos markerPos, Level level, int areaTeam) {
-        mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
-            cap.setStrategy(strategy);
-            cap.setSpawnPosition(mob.blockPosition());
-            cap.setStrategyMarkerPos(markerPos);
-            cap.setAreaTeam(areaTeam); // 🔥 保存区域编号
+                    // 移除冲突的原版Goals
+                    removeConflictingGoals(mob);
 
-            Logica.LOGGER.info("Applied {} strategy (team {}) to {} at {}",
-                    strategy, areaTeam, mob.getName().getString(), mob.blockPosition());
-        });
+                    // 重新注册基础调查Goals
+                    mob.goalSelector.addGoal(3, new InvestigateGoal(mob));
+                    mob.goalSelector.addGoal(6, new SearchingGoal(mob));
 
-        // 如果是Patrol或Sentries策略，查找路径点
-        if (strategy == AIStrategy.PATROL || strategy == AIStrategy.SENTRIES) {
-            // 🔥 传递区域编号到 WaypointFinder
-            List<BlockPos> waypoints = WaypointFinder.findWaypoints(level, markerPos, strategy, areaTeam);
-
-            mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
-                cap.setWaypoints(waypoints);
-            });
-
-            if (!waypoints.isEmpty()) {
-                Logica.LOGGER.info("Found {} waypoints for {} strategy (team {})",
-                        waypoints.size(), strategy, areaTeam);
-            } else {
-                Logica.LOGGER.warn("No waypoints found for {} strategy (team {})",
-                        strategy, areaTeam);
+                    // 标记已注册（用于当前会话）
+                    mob.getPersistentData().putBoolean("logica_basic_goals_registered", true);
+                }
             }
-        }
-
-        // 注册对应的Goals
-        registerStrategyGoals(mob, strategy);
+        });
     }
 
+
     /**
-     * 注册AI Goals到实体
+     * 为策略怪物注册完整的Goals（包括基础Goals和策略Goals）
      *
-     * 优先级架构（方案B改进）：
-     * Priority -1: CombatMonitorGoal (新增 - 监控战斗状态，不占用标志位)
-     * Priority  0: FloatGoal (原版，保留不动)
-     *              TrackingGoal (TRACKING状态 - 战斗中丢失目标时追踪)
-     * Priority  1: InvestigateGoal (ALERT状态 - 调查声音来源)
-     * Priority  2: SearchingGoal (SEARCHING状态 - 搜索模式)
-     * Priority  3: GuardGoal / SentriesGoal / PatrolGoal (IDLE状态 - 策略行为)
-     * Priority  4+: 原版Raid Goals (被自然抑制)
-     *
-     * 设计原理：
-     * - 使用阶梯优先级避免同一优先级的Goals相互竞争
-     * - 状态机确保每个优先级只有一个Goal的canUse()返回true
-     * - TRACKING(0) > ALERT(1) > SEARCHING(2) > IDLE(3) 符合紧急程度
-     * - 所有自定义Goals优先级低于FloatGoal，确保浮水功能
+     * 注意：此方法用于重新加载实体时恢复Goals
+     * 调用者负责检查是否需要注册（避免重复）
      */
-    private static void registerStrategyGoals(Mob mob, AIStrategy strategy) {
-        // 移除可能干扰的原版随机移动Goals
+    public static void registerStrategyGoals(Mob mob, AIStrategy strategy) {
+        // 移除冲突的Goals
         removeConflictingGoals(mob);
 
-        // Priority -1: CombatMonitorGoal（最高优先级，不占用标志位）
+        // 注册完整的Goals（包括基础调查Goals和策略Goals）
         mob.goalSelector.addGoal(-1, new CombatMonitorGoal(mob));
+        mob.goalSelector.addGoal(2, new TrackingGoal(mob));
+        mob.goalSelector.addGoal(3, new InvestigateGoal(mob));  // 基础Goal (ALERT状态)
+        mob.goalSelector.addGoal(6, new SearchingGoal(mob));    // 基础Goal (SEARCHING状态, 低优先级不干扰移动)
 
-        // Priority 0: TrackingGoal（TRACKING状态，最紧急）
-        mob.goalSelector.addGoal(0, new TrackingGoal(mob));
-
-        // Priority 1: InvestigateGoal（ALERT状态，次紧急）
-        mob.goalSelector.addGoal(1, new InvestigateGoal(mob));
-
-        // Priority 2: SearchingGoal（SEARCHING状态）
-        mob.goalSelector.addGoal(2, new SearchingGoal(mob));
-
-        // Priority 3: 策略特定的Goal（IDLE状态，基础巡逻）
+        // 注册策略Goal
         switch (strategy) {
             case GUARD:
                 mob.goalSelector.addGoal(3, new GuardGoal(mob));
-                Logica.LOGGER.debug("Registered GuardGoal for {}", mob.getName().getString());
                 break;
-
             case SENTRIES:
                 mob.goalSelector.addGoal(3, new SentriesGoal(mob));
-                Logica.LOGGER.debug("Registered SentriesGoal for {}", mob.getName().getString());
                 break;
-
             case PATROL:
                 mob.goalSelector.addGoal(3, new PatrolGoal(mob));
-                Logica.LOGGER.debug("Registered PatrolGoal for {}", mob.getName().getString());
                 break;
         }
 
-        // 输出所有Goal及其优先级
-        Logica.LOGGER.info("Goals registered for {} with {} strategy", mob.getName().getString(), strategy);
-        Logica.LOGGER.info("=== All Goals for {} ===", mob.getName().getString());
-        mob.goalSelector.getAvailableGoals().forEach(goal -> {
-            Logica.LOGGER.info("  Priority {}: {} (flags: {})",
-                goal.getPriority(),
-                goal.getGoal().getClass().getSimpleName(),
-                goal.getFlags());
-        });
-        Logica.LOGGER.info("=== End Goals List ===");
+        // 标记已注册策略Goals（也包含了基础Goals）
+        mob.getPersistentData().putBoolean("logica_strategy_goals_registered", true);
+        mob.getPersistentData().putBoolean("logica_basic_goals_registered", true);
+
+        Logica.LOGGER.info("Registered complete strategy goals ({}) for {}",
+                strategy, mob.getName().getString());
     }
 
     /**
-     * 为未受策略影响的怪物注册基础调查Goals
+     * 为普通怪物注册基础调查Goals
      * 允许它们响应声音诱饵
+     *
+     * 注意：此方法由PerceptionEventHandler在怪物首次感知玩家时调用
      */
-    private static void registerBasicInvestigationGoals(Mob mob) {
+    public static void registerBasicInvestigationGoals(Mob mob) {
+        // 防止重复注册（使用独立的标记）
+        if (mob.getPersistentData().getBoolean("logica_basic_goals_registered")) {
+            return;
+        }
+
         // 移除干扰的原版Goals
         removeConflictingGoals(mob);
 
-        // 使用阶梯优先级，避免Goals竞争
-        mob.goalSelector.addGoal(1, new InvestigateGoal(mob));  // ALERT状态
-        mob.goalSelector.addGoal(2, new SearchingGoal(mob));    // SEARCHING状态
+        // 注册基础调查Goals
+        // Priority 3: 调查Goal (ALERT状态)
+        // Priority 6: 搜索Goal (SEARCHING状态, 低优先级不干扰RandomStrollGoal)
+        mob.goalSelector.addGoal(3, new InvestigateGoal(mob));  // ALERT状态
+        mob.goalSelector.addGoal(6, new SearchingGoal(mob));    // SEARCHING状态
 
-        Logica.LOGGER.debug("Registered basic investigation goals for {}", mob.getName().getString());
+        // 标记已注册基础Goals（持久化到Capability）
+        mob.getCapability(AICapabilityProvider.AI_CAPABILITY).ifPresent(cap -> {
+            cap.setHasBasicGoals(true);
+        });
+
+        // 也设置PersistentData标记（用于当前会话）
+        mob.getPersistentData().putBoolean("logica_basic_goals_registered", true);
+
+        Logica.LOGGER.info("Registered basic investigation goals for {}", mob.getName().getString());
     }
 
     /**
      * 移除可能干扰策略Goals的原版Goals
      *
      * 激进策略：移除所有Raid相关Goals和干扰性Goals
+     *
+     * 注意：此方法被BlockEventHandler调用，需要public访问权限
      */
-    private static void removeConflictingGoals(Mob mob) {
+    public static void removeConflictingGoals(Mob mob) {
         mob.goalSelector.getAvailableGoals().removeIf(goal -> {
             String goalName = goal.getGoal().getClass().getSimpleName();
             int priority = goal.getPriority();
 
-            // 移除RandomStrollGoal - 会干扰策略移动
-            if (goalName.contains("RandomStroll")) {
-                Logica.LOGGER.debug("Removed {} from {}", goalName, mob.getName().getString());
-                return true;
-            }
-
-            // 移除RandomLookAroundGoal - 会干扰转向控制
-            if (goalName.contains("RandomLookAround")) {
-                Logica.LOGGER.debug("Removed {} from {}", goalName, mob.getName().getString());
-                return true;
-            }
-
-            // 移除WaterAvoidingRandomStrollGoal
-            if (goalName.contains("WaterAvoidingRandomStroll")) {
-                Logica.LOGGER.debug("Removed {} from {}", goalName, mob.getName().getString());
-                return true;
-            }
-
-            // 移除LookAtPlayerGoal - 会干扰转向声音来源
-            if (goalName.contains("LookAtPlayer")) {
-                Logica.LOGGER.debug("Removed {} from {}", goalName, mob.getName().getString());
-                return true;
-            }
-
-            // 🔥 激进移除：所有Raid相关Goals（彻底解决竞争问题）
+            // 🔥 只移除Raid相关Goals（会完全接管AI）
             if (goalName.contains("Raid") || goalName.contains("Raider")) {
                 Logica.LOGGER.info("Removed Raid Goal: {} (Priority {}) from {}",
                         goalName, priority, mob.getName().getString());

@@ -54,14 +54,20 @@ public class InvestigateGoal extends Goal {
     public boolean canUse() {
         IAICapability aiCap = mob.getCapability(AICapabilityProvider.AI_CAPABILITY).orElse(null);
         if (aiCap == null) {
-            Logica.LOGGER.debug("InvestigateGoal.canUse(): No AI capability for {}",
-                    mob.getName().getString());
+            if (LogicaConfig.shouldLogGoalLifecycle()) {
+                Logica.LOGGER.warn("🔥 InvestigateGoal.canUse(): Mob {} has NO AI Capability!",
+                        mob.getName().getString());
+            }
             return false;
         }
 
         AIState currentState = aiCap.getState();
-        Logica.LOGGER.debug("InvestigateGoal.canUse(): Mob {} state is {}",
-                mob.getName().getString(), currentState);
+        BlockPos targetPos = aiCap.getLastKnownTargetPos();
+
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.debug("InvestigateGoal.canUse(): Mob {}, State={}, TargetPos={}",
+                    mob.getName().getString(), currentState, targetPos);
+        }
 
         // 只在ALERT状态下执行
         if (currentState != AIState.ALERT) {
@@ -69,14 +75,12 @@ public class InvestigateGoal extends Goal {
         }
 
         // 必须有调查目标
-        BlockPos targetPos = aiCap.getLastKnownTargetPos();
-        Logica.LOGGER.debug("InvestigateGoal.canUse(): Mob {} investigation target: {}",
-                mob.getName().getString(), targetPos);
-
         if (targetPos == null) {
             // 没有调查目标，直接返回IDLE
             aiCap.setState(AIState.IDLE);
-            Logica.LOGGER.debug("InvestigateGoal.canUse(): No investigation target, returning to IDLE");
+            if (LogicaConfig.shouldLogStateTransitions()) {
+                Logica.LOGGER.warn("🔥 InvestigateGoal.canUse(): State is ALERT but targetPos is NULL! Returning to IDLE");
+            }
             return false;
         }
 
@@ -87,8 +91,10 @@ public class InvestigateGoal extends Goal {
         this.lookAroundCooldown = 0;
         this.navigationFailedTicks = 0;
 
-        Logica.LOGGER.info("Mob {} starting investigation at {}",
-                mob.getName().getString(), investigationTarget);
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.info("Mob {} starting investigation at {}",
+                    mob.getName().getString(), investigationTarget);
+        }
 
         return true;
     }
@@ -121,7 +127,9 @@ public class InvestigateGoal extends Goal {
      */
     @Override
     public void start() {
-        Logica.LOGGER.info("🔥 InvestigateGoal.start() CALLED for {}", mob.getName().getString());
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.info("🔥 InvestigateGoal.start() CALLED for {}", mob.getName().getString());
+        }
 
         // 前往调查位置
         net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(investigationTarget, 1);
@@ -132,12 +140,16 @@ public class InvestigateGoal extends Goal {
             double speedMultiplier = LogicaConfig.INVESTIGATION_SPEED_MULTIPLIER.get();
             moveToSuccess = mob.getNavigation().moveTo(path, speedMultiplier);
 
-            Logica.LOGGER.info("🔥 moveTo() returned: {} (speed multiplier: {})",
-                    moveToSuccess, speedMultiplier);
+            if (LogicaConfig.shouldLogNavigation()) {
+                Logica.LOGGER.info("🔥 moveTo() returned: {} (speed multiplier: {})",
+                        moveToSuccess, speedMultiplier);
+            }
         }
 
-        Logica.LOGGER.info("Mob {} navigating to investigation point {} (path: {}, moveTo success: {})",
-                mob.getName().getString(), investigationTarget, path != null ? "created" : "null", moveToSuccess);
+        if (LogicaConfig.shouldLogNavigation()) {
+            Logica.LOGGER.info("Mob {} navigating to investigation point {} (path: {}, moveTo success: {})",
+                    mob.getName().getString(), investigationTarget, path != null ? "created" : "null", moveToSuccess);
+        }
     }
 
     /**
@@ -145,8 +157,10 @@ public class InvestigateGoal extends Goal {
      */
     @Override
     public void stop() {
-        Logica.LOGGER.info("🔥 InvestigateGoal.stop() CALLED - hasArrived: {}, lookAroundTimer: {}",
-                hasArrived, lookAroundTimer);
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.info("🔥 InvestigateGoal.stop() CALLED - hasArrived: {}, lookAroundTimer: {}",
+                    hasArrived, lookAroundTimer);
+        }
 
         IAICapability aiCap = mob.getCapability(AICapabilityProvider.AI_CAPABILITY).orElse(null);
         if (aiCap == null) {
@@ -158,11 +172,15 @@ public class InvestigateGoal extends Goal {
             aiCap.setState(AIState.IDLE);
             aiCap.setLastKnownTargetPos(null); // 清除调查目标
 
-            Logica.LOGGER.info("🔥 Mob {} finished investigation, returning to IDLE",
-                    mob.getName().getString());
+            if (LogicaConfig.shouldLogStateTransitions()) {
+                Logica.LOGGER.info("🔥 Mob {} finished investigation, returning to IDLE",
+                        mob.getName().getString());
+            }
         } else {
-            Logica.LOGGER.warn("🔥 InvestigateGoal.stop() but state is NOT ALERT: {}",
-                    aiCap.getState());
+            if (LogicaConfig.shouldLogGoalLifecycle()) {
+                Logica.LOGGER.warn("🔥 InvestigateGoal.stop() but state is NOT ALERT: {}",
+                        aiCap.getState());
+            }
         }
 
         // 停止导航
@@ -177,7 +195,7 @@ public class InvestigateGoal extends Goal {
     @Override
     public void tick() {
         // DEBUG: 每20 tick记录一次
-        if (++tickLogCounter >= 20) {
+        if (LogicaConfig.shouldLogGoalLifecycle() && ++tickLogCounter >= 20) {
             tickLogCounter = 0;
             Logica.LOGGER.info("InvestigateGoal.tick() - mob: {}, target: {}, arrived: {}, navigation: {}, pos: {}, navState: [isDone={}, isStuck={}, hasPath={}]",
                     mob.getName().getString(), investigationTarget, hasArrived,
@@ -186,10 +204,14 @@ public class InvestigateGoal extends Goal {
                     mob.getNavigation().isDone(),
                     mob.getNavigation().isStuck(),
                     mob.getNavigation().getPath() != null);
+        } else if (!LogicaConfig.shouldLogGoalLifecycle()) {
+            tickLogCounter = 0; // 重置计数器
         }
 
         if (investigationTarget == null) {
-            Logica.LOGGER.warn("InvestigateGoal.tick() - investigationTarget is null!");
+            if (LogicaConfig.shouldLogGoalLifecycle()) {
+                Logica.LOGGER.warn("InvestigateGoal.tick() - investigationTarget is null!");
+            }
             return;
         }
 
@@ -199,8 +221,10 @@ public class InvestigateGoal extends Goal {
             BlockPos currentTarget = aiCap.getLastKnownTargetPos();
             if (currentTarget != null && !currentTarget.equals(investigationTarget)) {
                 // 目标已变化，重新开始调查
-                Logica.LOGGER.info("🔥 InvestigateGoal target changed from {} to {}, restarting investigation",
-                        investigationTarget, currentTarget);
+                if (LogicaConfig.shouldLogGoalLifecycle()) {
+                    Logica.LOGGER.info("🔥 InvestigateGoal target changed from {} to {}, restarting investigation",
+                            investigationTarget, currentTarget);
+                }
                 investigationTarget = currentTarget;
                 hasArrived = false;
                 lookAroundTimer = 0;
@@ -229,8 +253,10 @@ public class InvestigateGoal extends Goal {
                 mob.getNavigation().stop();
                 lookAroundCooldown = 5; // 到达后立即开始第一次转向（5 tick后）
 
-                Logica.LOGGER.info("🔥 Mob {} ARRIVED at investigation point (distance: {}), starting lookAround (duration: {} ticks)",
-                        mob.getName().getString(), distance, LogicaConfig.INVESTIGATION_DURATION_TICKS.get());
+                if (LogicaConfig.shouldLogGoalLifecycle()) {
+                    Logica.LOGGER.info("🔥 Mob {} ARRIVED at investigation point (distance: {}), starting lookAround (duration: {} ticks)",
+                            mob.getName().getString(), distance, LogicaConfig.INVESTIGATION_DURATION_TICKS.get());
+                }
             } else {
                 // 继续前往（处理可能的路径丢失）
                 if (mob.getNavigation().isDone()) {
@@ -246,14 +272,18 @@ public class InvestigateGoal extends Goal {
 
                         if (navigationFailedTicks >= MAX_NAVIGATION_FAILED_TICKS) {
                             // 超时，强制视为到达并开始环顾
-                            Logica.LOGGER.warn("🔥 InvestigateGoal navigation failed for {} ticks, forcing arrival at current position",
-                                    navigationFailedTicks);
+                            if (LogicaConfig.shouldLogNavigation()) {
+                                Logica.LOGGER.warn("🔥 InvestigateGoal navigation failed for {} ticks, forcing arrival at current position",
+                                        navigationFailedTicks);
+                            }
                             hasArrived = true;
                             lookAroundCooldown = 5;
                             mob.getNavigation().stop();
                         } else {
-                            Logica.LOGGER.warn("🔥 InvestigateGoal re-navigation failed! path: {}, moveTo: {}, failedTicks: {}/{}",
-                                    path != null, moveToSuccess, navigationFailedTicks, MAX_NAVIGATION_FAILED_TICKS);
+                            if (LogicaConfig.shouldLogNavigation()) {
+                                Logica.LOGGER.warn("🔥 InvestigateGoal re-navigation failed! path: {}, moveTo: {}, failedTicks: {}/{}",
+                                        path != null, moveToSuccess, navigationFailedTicks, MAX_NAVIGATION_FAILED_TICKS);
+                            }
                         }
                     } else {
                         // 导航成功，重置失败计数
@@ -279,15 +309,19 @@ public class InvestigateGoal extends Goal {
                 // 转向该方向
                 mob.getLookControl().setLookAt(lookX, lookY, lookZ, 10.0F, mob.getMaxHeadXRot());
 
-                Logica.LOGGER.debug("Looking at ({}, {}, {}) - timer: {}/{} ticks",
-                        (int)lookX, (int)lookY, (int)lookZ,
-                        lookAroundTimer, LogicaConfig.INVESTIGATION_DURATION_TICKS.get());
+                if (LogicaConfig.shouldLogGoalLifecycle()) {
+                    Logica.LOGGER.debug("Looking at ({}, {}, {}) - timer: {}/{} ticks",
+                            (int)lookX, (int)lookY, (int)lookZ,
+                            lookAroundTimer, LogicaConfig.INVESTIGATION_DURATION_TICKS.get());
+                }
             }
 
             // 检查是否完成环顾
             if (lookAroundTimer >= LogicaConfig.INVESTIGATION_DURATION_TICKS.get()) {
-                Logica.LOGGER.info("🔥 Mob {} completed lookAround ({} ticks), Goal should stop now",
-                        mob.getName().getString(), lookAroundTimer);
+                if (LogicaConfig.shouldLogGoalLifecycle()) {
+                    Logica.LOGGER.info("🔥 Mob {} completed lookAround ({} ticks), Goal should stop now",
+                            mob.getName().getString(), lookAroundTimer);
+                }
             }
         }
 

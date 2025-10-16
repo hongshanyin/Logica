@@ -1,6 +1,7 @@
 package com.sorcery.logica;
 
 import com.mojang.logging.LogUtils;
+import com.sorcery.logica.blocks.ModBlockEntities;
 import com.sorcery.logica.blocks.ModBlocks;
 import com.sorcery.logica.capability.CapabilityHandler;
 import com.sorcery.logica.config.LogicaConfig;
@@ -82,6 +83,9 @@ public class Logica {
         // 注册方块和物品
         ModBlocks.BLOCKS.register(modEventBus);
         ModBlocks.ITEMS.register(modEventBus);
+
+        // 注册BlockEntity
+        ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
 
         // 注册创造标签页
         CREATIVE_MODE_TABS.register(modEventBus);

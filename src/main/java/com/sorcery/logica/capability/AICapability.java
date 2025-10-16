@@ -20,11 +20,13 @@ public class AICapability implements IAICapability {
     private BlockPos spawnPosition = null;
     private BlockPos strategyMarkerPos = null;
     private BlockPos lastKnownTargetPos = null;
+    private BlockPos interruptedPatrolPosition = null;
 
     private List<BlockPos> waypoints = new ArrayList<>();
     private int currentWaypointIndex = 0;
 
     private int trackingTicks = 0;
+    private boolean hasBasicGoals = false;
 
     @Override
     public AIState getState() {
@@ -121,5 +123,25 @@ public class AICapability implements IAICapability {
     @Override
     public void setTrackingTicks(int ticks) {
         this.trackingTicks = ticks;
+    }
+
+    @Override
+    public BlockPos getInterruptedPatrolPosition() {
+        return interruptedPatrolPosition;
+    }
+
+    @Override
+    public void setInterruptedPatrolPosition(BlockPos pos) {
+        this.interruptedPatrolPosition = pos;
+    }
+
+    @Override
+    public boolean hasBasicGoals() {
+        return hasBasicGoals;
+    }
+
+    @Override
+    public void setHasBasicGoals(boolean hasGoals) {
+        this.hasBasicGoals = hasGoals;
     }
 }

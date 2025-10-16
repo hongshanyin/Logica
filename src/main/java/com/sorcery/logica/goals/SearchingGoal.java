@@ -18,25 +18,22 @@ import java.util.Random;
  *
  * 功能：
  * - 在SEARCHING状态时触发
- * - 前往最后已知位置
- * - 到达后环顾四周搜索
+ * - 在当前位置停留10秒
+ * - 使用原版RandomStrollGoal自然游荡（Priority 5）
  * - 超时后返回IDLE状态
  *
- * 优先级：3（与InvestigateGoal相同）
+ * 优先级：3（高于RandomStrollGoal的5）
+ * 注意：此Goal不控制移动,只控制状态和超时,移动由原版RandomStrollGoal接管
  */
 public class SearchingGoal extends Goal {
 
     private final Mob mob;
-    private final Random random = new Random();
-
-    private BlockPos searchTarget;
-    private int searchTimer;
-    private int lookAroundCooldown;
-    private boolean hasArrived;
+    private int searchTimer; // 搜索计时器
 
     public SearchingGoal(Mob mob) {
         this.mob = mob;
-        this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+        // 🔥 不设置任何Flag,让原版RandomStrollGoal接管移动
+        this.setFlags(EnumSet.noneOf(Flag.class));
     }
 
     /**
@@ -54,18 +51,12 @@ public class SearchingGoal extends Goal {
             return false;
         }
 
-        // 获取搜索位置
-        BlockPos targetPos = aiCap.getLastKnownTargetPos();
-        if (targetPos == null) {
-            // 没有搜索目标，直接返回IDLE
-            aiCap.setState(AIState.IDLE);
-            return false;
-        }
-
-        this.searchTarget = targetPos;
-        this.hasArrived = false;
         this.searchTimer = 0;
-        this.lookAroundCooldown = 0;
+
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.info("🔥 SearchingGoal.canUse(): Mob {} starting search (will use vanilla RandomStrollGoal for movement)",
+                    mob.getName().getString());
+        }
 
         return true;
     }
@@ -85,8 +76,13 @@ public class SearchingGoal extends Goal {
             return false;
         }
 
-        // 检查搜索超时（比调查时间长一些）
-        if (hasArrived && searchTimer >= LogicaConfig.INVESTIGATION_DURATION_TICKS.get() * 2) {
+        // 超时检查：10秒
+        int maxSearchDuration = LogicaConfig.INVESTIGATION_DURATION_TICKS.get();
+        if (searchTimer >= maxSearchDuration) {
+            if (LogicaConfig.shouldLogStateTransitions()) {
+                Logica.LOGGER.info("🔥 SearchingGoal timeout for {} (searchTimer={}/{}s)",
+                        mob.getName().getString(), searchTimer, maxSearchDuration/20);
+            }
             return false;
         }
 
@@ -98,13 +94,9 @@ public class SearchingGoal extends Goal {
      */
     @Override
     public void start() {
-        Logica.LOGGER.debug("Mob {} starting search at {}",
-                mob.getName().getString(), searchTarget);
-
-        // 前往搜索位置
-        net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(searchTarget, 1);
-        if (path != null) {
-            mob.getNavigation().moveTo(path, mob.getSpeed() * 1.2); // 稍快速度
+        if (LogicaConfig.shouldLogGoalLifecycle()) {
+            Logica.LOGGER.info("🔥 SearchingGoal.start() - Mob {} will now wander using vanilla RandomStrollGoal",
+                    mob.getName().getString());
         }
     }
 
@@ -123,78 +115,24 @@ public class SearchingGoal extends Goal {
             aiCap.setState(AIState.IDLE);
             aiCap.setLastKnownTargetPos(null);
 
-            Logica.LOGGER.debug("Mob {} finished searching, returning to IDLE",
-                    mob.getName().getString());
+            if (LogicaConfig.shouldLogStateTransitions()) {
+                Logica.LOGGER.info("🔥 SearchingGoal.stop() - Mob {} finished searching, returning to IDLE (searchTimer={})",
+                        mob.getName().getString(), searchTimer);
+            }
         }
-
-        mob.getNavigation().stop();
-        this.searchTarget = null;
-        this.hasArrived = false;
     }
 
     /**
      * 每tick执行
+     *
+     * 简化后的行为：
+     * - 只负责计时
+     * - 不控制移动（由原版RandomStrollGoal接管）
+     * - 不控制转头（由原版LookAtPlayerGoal等接管）
      */
     @Override
     public void tick() {
-        if (searchTarget == null) {
-            return;
-        }
-
-        if (!hasArrived) {
-            // 前往搜索位置
-            Vec3 mobPos = mob.position();
-            Vec3 targetPos = Vec3.atCenterOf(searchTarget);
-            double distance = mobPos.distanceTo(targetPos);
-
-            if (distance < 4.0) {
-                // 到达搜索区域
-                hasArrived = true;
-                mob.getNavigation().stop();
-
-                Logica.LOGGER.debug("Mob {} arrived at search area, searching",
-                        mob.getName().getString());
-            } else {
-                // 继续前往
-                if (mob.getNavigation().isDone()) {
-                    net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(searchTarget, 1);
-                    if (path != null) {
-                        mob.getNavigation().moveTo(path, mob.getSpeed() * 1.2);
-                    }
-                }
-            }
-        } else {
-            // 已到达，搜索中
-            searchTimer++;
-
-            // 在搜索区域附近游荡
-            if (mob.getNavigation().isDone()) {
-                // 随机选择附近的位置
-                double angle = random.nextDouble() * Math.PI * 2;
-                double radius = 3.0 + random.nextDouble() * 3.0;
-                int targetX = (int) (searchTarget.getX() + Math.cos(angle) * radius);
-                int targetZ = (int) (searchTarget.getZ() + Math.sin(angle) * radius);
-                BlockPos targetPos = new BlockPos(targetX, searchTarget.getY(), targetZ);
-
-                net.minecraft.world.level.pathfinder.Path path = mob.getNavigation().createPath(targetPos, 1);
-                if (path != null) {
-                    mob.getNavigation().moveTo(path, mob.getSpeed());
-                }
-            }
-
-            // 定期环顾
-            if (--lookAroundCooldown <= 0) {
-                lookAroundCooldown = LogicaConfig.LOOK_AROUND_INTERVAL.get() / 2; // 更频繁
-
-                double angle = random.nextDouble() * Math.PI * 2;
-                double radius = 10.0;
-                double lookX = mob.getX() + Math.cos(angle) * radius;
-                double lookZ = mob.getZ() + Math.sin(angle) * radius;
-                double lookY = mob.getY() + mob.getEyeHeight();
-
-                mob.getLookControl().setLookAt(lookX, lookY, lookZ, 10.0F, mob.getMaxHeadXRot());
-            }
-        }
+        searchTimer++;
     }
 
     /**
