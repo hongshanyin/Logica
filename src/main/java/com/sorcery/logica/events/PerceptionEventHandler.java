@@ -63,16 +63,15 @@ public class PerceptionEventHandler {
             return;
         }
 
-        // 🔥 忽略创造模式玩家的声音
-        if (LogicaConfig.IGNORE_CREATIVE_PLAYERS.get() && sourceEntity instanceof Player player) {
-            if (player.isCreative()) {
+        // 过滤声音来源：只响应玩家产生的振动
+        if (sourceEntity instanceof Player player) {
+            // 忽略创造模式玩家的声音
+            if (LogicaConfig.IGNORE_CREATIVE_PLAYERS.get() && player.isCreative()) {
                 return;
             }
-        }
-
-        // 🔥 过滤声音来源：忽略其他怪物产生的声音（除了玩家）
-        if (sourceEntity != null && sourceEntity instanceof Mob) {
-            // 声音来自其他怪物，忽略（警报系统通过broadcastAlert直接设置目标）
+            // 玩家产生的声音，继续处理
+        } else {
+            // 非玩家产生的声音（怪物、箭矢落地、其他实体等），全部忽略
             return;
         }
 
